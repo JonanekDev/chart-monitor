@@ -1,0 +1,17 @@
+{
+  "name": "helm-chart-monitoring",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --recursive --parallel run dev",
+    "build": "pnpm --recursive run build",
+    "test": "pnpm --recursive run test",
+    "format": "prettier --write .",
+    "db:generate": "pnpm --filter backend run db:generate",
+    "db:migrate": "pnpm --filter backend run db:migrate"
+  },
+  "devDependencies": {
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3"
+  }
+}

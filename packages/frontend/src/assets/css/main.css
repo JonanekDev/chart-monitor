@@ -1,0 +1,178 @@
+@import './variables.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'Roboto', sans-serif;
+  line-height: 1.5;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.mono {
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+}
+
+.text-muted {
+  color: var(--color-text-muted);
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+a:hover {
+  color: var(--color-primary-hover);
+}
+
+.container {
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+
+main.container {
+  flex: 1;
+  padding-top: var(--space-8);
+  padding-bottom: var(--space-12);
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  font-weight: bold;
+  font-family: 'DM Mono', monospace;
+  padding: var(--space-3) var(--space-8);
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  transition:
+    background-color var(--transition),
+    transform var(--transition);
+}
+
+.btn-primary:hover {
+  background-color: var(--color-primary-hover);
+  transform: translateY(-2px);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.card {
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.85rem;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+}
+
+.badge-up_to_date {
+  background-color: var(--color-primary-subtle);
+  color: var(--color-primary);
+}
+
+.badge-outdated {
+  background-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  color: var(--color-accent);
+}
+
+.badge-unknown {
+  background-color: var(--color-bg-subtle);
+  color: var(--color-text-disabled);
+}
+
+.badge-pending,
+.badge-running {
+  background-color: color-mix(in srgb, var(--color-secondary) 20%, transparent);
+  color: var(--color-secondary);
+}
+
+.badge-failed {
+  background-color: color-mix(in srgb, #ef4444 20%, transparent);
+  color: #ef4444;
+}
+
+.badge-succeeded {
+  background-color: var(--color-primary-subtle);
+  color: var(--color-primary);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+th {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+input,
+textarea {
+  background-color: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  padding: var(--space-3);
+  font-family: inherit;
+  font-size: 1rem;
+  width: 100%;
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+label {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}

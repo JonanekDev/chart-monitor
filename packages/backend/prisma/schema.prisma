@@ -1,0 +1,64 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ScanState {
+  pending
+  running
+  succeeded
+  failed
+}
+
+enum VersionStatus {
+  up_to_date
+  outdated
+  unknown
+}
+
+model Scan {
+  id             String          @id @default(uuid())
+  repoUrl        String
+  searchPath     String?
+  ref            String?
+  state          ScanState       @default(pending)
+  errorMessage   String?
+  createdAt      DateTime        @default(now())
+  finishedAt     DateTime?
+  chartFindings  ChartFinding[]
+  imageFindings  ImageFinding[]
+}
+
+model ChartFinding {
+  id                  String        @id @default(uuid())
+  scan                Scan          @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scanId              String
+  applicationName     String
+  applicationSetName  String
+  chartName           String
+  repoUrl             String
+  currentVersion      String
+  latestVersion       String?
+  status              VersionStatus
+  note                String?
+
+  @@index([scanId])
+}
+
+model ImageFinding {
+  id               String        @id @default(uuid())
+  scan             Scan          @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scanId           String
+  applicationName  String
+  image            String
+  currentTag       String
+  latestTag        String?
+  status           VersionStatus
+  note             String?
+
+  @@index([scanId])
+}

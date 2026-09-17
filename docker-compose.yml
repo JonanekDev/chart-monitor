@@ -1,0 +1,46 @@
+secrets:
+  github_app_key:
+    file: ./secrets/github-app-key.pem
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: chart_monitor
+    volumes:
+      # postgres 18+ images want the volume at the parent dir, not .../data (see startup error otherwise)
+      - postgres_data:/var/lib/postgresql
+
+  backend:
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - packages/backend/.env
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/chart_monitor
+    secrets:
+      - github_app_key
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+
+  frontend:
+    build:
+      context: .
+      dockerfile: packages/frontend/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:3000
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
