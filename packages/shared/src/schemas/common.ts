@@ -29,3 +29,21 @@ export const scanStateSchema = z.enum([
 ]);
 
 export type ScanStateValue = z.infer<typeof scanStateSchema>;
+
+export const CveSeverity = {
+  UNKNOWN: 'UNKNOWN',
+  LOW: 'LOW',
+  MEDIUM: 'MEDIUM',
+  HIGH: 'HIGH',
+  CRITICAL: 'CRITICAL',
+} as const;
+
+export const cveSeveritySchema = z.enum([
+  CveSeverity.UNKNOWN,
+  CveSeverity.LOW,
+  CveSeverity.MEDIUM,
+  CveSeverity.HIGH,
+  CveSeverity.CRITICAL,
+]);
+
+export type CveSeverityValue = z.infer<typeof cveSeveritySchema>;

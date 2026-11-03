@@ -1,4 +1,5 @@
 import type { Octokit } from '@octokit/rest';
+import { GithubAccessError } from '../errors.js';
 
 export interface RepoFile {
   path: string;
@@ -65,7 +66,7 @@ export async function fetchFileContent(
 ): Promise<string> {
   const { data } = await octokit.repos.getContent({ owner, repo, path, ref });
   if (Array.isArray(data) || data.type !== 'file' || !data.content) {
-    throw new Error(`${path} is not a readable file at ref ${ref}`);
+    throw new GithubAccessError(`${path} is not a readable file at ref ${ref}`);
   }
   return Buffer.from(data.content, 'base64').toString('utf-8');
 }

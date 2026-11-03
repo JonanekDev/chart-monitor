@@ -20,6 +20,14 @@ enum VersionStatus {
   unknown
 }
 
+enum CveSeverity {
+  UNKNOWN
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
 model Scan {
   id             String          @id @default(uuid())
   repoUrl        String
@@ -31,6 +39,7 @@ model Scan {
   finishedAt     DateTime?
   chartFindings  ChartFinding[]
   imageFindings  ImageFinding[]
+  cveFindings    CveFinding[]
 }
 
 model ChartFinding {
@@ -59,6 +68,22 @@ model ImageFinding {
   latestTag        String?
   status           VersionStatus
   note             String?
+
+  @@index([scanId])
+}
+
+model CveFinding {
+  id                String       @id @default(uuid())
+  scan              Scan         @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scanId            String
+  applicationName   String
+  image             String
+  vulnerabilityId   String
+  pkgName           String
+  installedVersion  String
+  fixedVersion      String?
+  severity          CveSeverity
+  title             String?
 
   @@index([scanId])
 }

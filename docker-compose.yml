@@ -14,6 +14,13 @@ services:
       # postgres 18+ images want the volume at the parent dir, not .../data (see startup error otherwise)
       - postgres_data:/var/lib/postgresql
 
+  trivy:
+    image: aquasec/trivy:0.74.0
+    restart: unless-stopped
+    command: server --listen 0.0.0.0:4954
+    volumes:
+      - trivy_cache:/root/.cache/trivy
+
   backend:
     build:
       context: .
@@ -23,12 +30,14 @@ services:
       - packages/backend/.env
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/chart_monitor
+      TRIVY_SERVER_URL: http://trivy:4954
     secrets:
       - github_app_key
     ports:
       - "3000:3000"
     depends_on:
       - postgres
+      - trivy
 
   frontend:
     build:
@@ -44,3 +53,4 @@ services:
 
 volumes:
   postgres_data:
+  trivy_cache:

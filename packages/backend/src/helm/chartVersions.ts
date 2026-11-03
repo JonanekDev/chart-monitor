@@ -20,7 +20,8 @@ function parseOciRef(repoUrl: string): { registryHost: string; repoPath: string 
   return { registryHost: registryHost as string, repoPath: rest.join('/') };
 }
 
-/** Fetches all published versions for a chart, whether it lives in a classic Helm repo (index.yaml) or an OCI registry. */
+/** Fetches all published versions for a chart, whether it lives in a classic Helm repo
+ * (index.yaml) or an OCI registry. */
 export async function fetchChartVersions(repoUrl: string, chartName: string): Promise<string[]> {
   if (repoUrl.startsWith('oci://')) {
     const { registryHost, repoPath } = parseOciRef(repoUrl);

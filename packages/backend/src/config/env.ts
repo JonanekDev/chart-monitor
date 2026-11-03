@@ -5,6 +5,7 @@ import { ConfigError } from '../errors.js';
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().url(),
+  TRIVY_SERVER_URL: z.string().url(),
   GITHUB_APP_ID: z.string().min(1),
   GITHUB_APP_PRIVATE_KEY_PATH: z.string().default('/run/secrets/github_app_key'),
   GITHUB_APP_PRIVATE_KEY: z.string().optional(),

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { scanStateSchema, versionStatusSchema } from './common.js';
+import { cveSeveritySchema, scanStateSchema, versionStatusSchema } from './common.js';
 
 export const createScanRequestSchema = z.object({
   repoUrl: z.string().url(),
@@ -33,6 +33,19 @@ export const imageFindingSchema = z.object({
 
 export type ImageFinding = z.infer<typeof imageFindingSchema>;
 
+export const cveFindingSchema = z.object({
+  applicationName: z.string(),
+  image: z.string(),
+  vulnerabilityId: z.string(),
+  pkgName: z.string(),
+  installedVersion: z.string(),
+  fixedVersion: z.string().nullable(),
+  severity: cveSeveritySchema,
+  title: z.string().nullable(),
+});
+
+export type CveFinding = z.infer<typeof cveFindingSchema>;
+
 export const scanSummarySchema = z.object({
   id: z.uuid(),
   repoUrl: z.string(),
@@ -47,6 +60,7 @@ export type ScanSummary = z.infer<typeof scanSummarySchema>;
 export const scanDetailSchema = scanSummarySchema.extend({
   chartFindings: z.array(chartFindingSchema),
   imageFindings: z.array(imageFindingSchema),
+  cveFindings: z.array(cveFindingSchema),
 });
 
 export type ScanDetail = z.infer<typeof scanDetailSchema>;

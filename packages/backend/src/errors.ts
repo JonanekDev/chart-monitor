@@ -12,4 +12,5 @@ export class ConfigError extends AppError {}
 export class GithubAccessError extends AppError {}
 export class ArgoCdParseError extends AppError {}
 export class HelmResolutionError extends AppError {}
+export class TrivyScanError extends AppError {}
 export class ScanNotFoundError extends AppError {}

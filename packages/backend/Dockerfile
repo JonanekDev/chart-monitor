@@ -1,6 +1,10 @@
+FROM aquasec/trivy:0.74.0 AS trivy
+
 FROM node:24-alpine
 
 RUN apk add --no-cache helm
+# Pinned to the same version as the `trivy` compose service — client/server versions must match.
+COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 
 RUN npm install -g pnpm
 

@@ -1,5 +1,10 @@
 import type { Octokit } from '@octokit/rest';
-import { VersionStatus, type ChartFinding, type ImageFinding } from '@chart-monitor/shared';
+import {
+  VersionStatus,
+  type ChartFinding,
+  type CveFinding,
+  type ImageFinding,
+} from '@chart-monitor/shared';
 import { getInstallationOctokit, parseGithubRepoUrl } from '../github/appAuth.js';
 import { fetchYamlFiles, getDefaultBranch } from '../github/repoClient.js';
 import { resolveApplicationSets } from '../argocd/findApplicationSets.js';
@@ -8,6 +13,11 @@ import { fetchChartVersions } from '../helm/chartVersions.js';
 import { compareVersions, findLatestVersion } from '../helm/versionCompare.js';
 import { renderChartImages } from '../helm/renderChart.js';
 import { fetchImageTags } from '../registry/imageRef.js';
+import { scanImageForVulnerabilities } from '../trivy/scanImage.js';
+import { mapWithConcurrency } from '../utils/concurrency.js';
+
+// Each trivy scan pulls image layers and runs full vuln-DB matching — cap how many run at once
+const CVE_SCAN_CONCURRENCY = 4;
 
 function createOctokitResolver() {
   const cache = new Map<string, Promise<Octokit>>();
@@ -42,10 +52,8 @@ async function resolveChartFinding(
 
 async function resolveImageFindings(
   applicationName: string,
-  source: ApplicationSource,
+  images: string[],
 ): Promise<ImageFinding[]> {
-  const images = await renderChartImages(source).catch(() => [] as string[]);
-
   return Promise.all(
     images.map(async (image): Promise<ImageFinding> => {
       const [repository, currentTag = 'latest'] = splitImageTag(image);
@@ -64,6 +72,15 @@ async function resolveImageFindings(
   );
 }
 
+async function resolveCveFindings(applicationName: string, images: string[]): Promise<CveFinding[]> {
+  const perImage = await mapWithConcurrency(images, CVE_SCAN_CONCURRENCY, async (image) => {
+    const vulnerabilities = await scanImageForVulnerabilities(image).catch(() => []);
+    const [repository] = splitImageTag(image);
+    return vulnerabilities.map((v): CveFinding => ({ applicationName, image: repository, ...v }));
+  });
+  return perImage.flat();
+}
+
 function splitImageTag(image: string): [string, string?] {
   const withoutDigest = image.split('@')[0] as string;
   const lastSlash = withoutDigest.lastIndexOf('/');
@@ -77,6 +94,7 @@ function splitImageTag(image: string): [string, string?] {
 export interface ScanResult {
   chartFindings: ChartFinding[];
   imageFindings: ImageFinding[];
+  cveFindings: CveFinding[];
 }
 
 export async function executeScan(
@@ -94,6 +112,7 @@ export async function executeScan(
 
   const chartFindings: ChartFinding[] = [];
   const imageFindings: ImageFinding[] = [];
+  const cveFindings: CveFinding[] = [];
 
   for (const app of applications) {
     for (const source of app.sources) {
@@ -104,9 +123,12 @@ export async function executeScan(
       );
       if (!chartFinding) continue;
       chartFindings.push(chartFinding);
-      imageFindings.push(...(await resolveImageFindings(app.applicationName, source)));
+
+      const images = await renderChartImages(source).catch(() => [] as string[]);
+      imageFindings.push(...(await resolveImageFindings(app.applicationName, images)));
+      cveFindings.push(...(await resolveCveFindings(app.applicationName, images)));
     }
   }
 
-  return { chartFindings, imageFindings };
+  return { chartFindings, imageFindings, cveFindings };
 }

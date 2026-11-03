@@ -1,11 +1,13 @@
 import { ScanState, type ScanDetail, type ScanSummary } from '@chart-monitor/shared';
-import type { Prisma, PrismaClient } from '../generated/prisma/client.js';
+import type { Prisma, PrismaClient, Scan } from '../generated/prisma/client.js';
 import { ScanNotFoundError } from '../errors.js';
 import { executeScan } from './runScan.js';
 
-type ScanWithFindings = Prisma.ScanGetPayload<{ include: { chartFindings: true; imageFindings: true } }>;
+type ScanWithFindings = Prisma.ScanGetPayload<{
+  include: { chartFindings: true; imageFindings: true; cveFindings: true };
+}>;
 
-function toScanSummary(scan: { id: string; repoUrl: string; state: string; createdAt: Date; finishedAt: Date | null; errorMessage: string | null }): ScanSummary {
+function toScanSummary(scan: Scan): ScanSummary {
   return {
     id: scan.id,
     repoUrl: scan.repoUrl,
@@ -36,6 +38,16 @@ function toScanDetail(scan: ScanWithFindings): ScanDetail {
       latestTag: f.latestTag,
       status: f.status,
       note: f.note,
+    })),
+    cveFindings: scan.cveFindings.map((f) => ({
+      applicationName: f.applicationName,
+      image: f.image,
+      vulnerabilityId: f.vulnerabilityId,
+      pkgName: f.pkgName,
+      installedVersion: f.installedVersion,
+      fixedVersion: f.fixedVersion,
+      severity: f.severity,
+      title: f.title,
     })),
   };
 }
@@ -69,6 +81,9 @@ async function runInBackground(
       prisma.imageFinding.createMany({
         data: result.imageFindings.map((f) => ({ ...f, scanId })),
       }),
+      prisma.cveFinding.createMany({
+        data: result.cveFindings.map((f) => ({ ...f, scanId })),
+      }),
       prisma.scan.update({
         where: { id: scanId },
         data: { state: ScanState.SUCCEEDED, finishedAt: new Date() },
@@ -94,7 +109,7 @@ export async function listScans(prisma: PrismaClient): Promise<ScanSummary[]> {
 export async function getScan(prisma: PrismaClient, id: string): Promise<ScanDetail> {
   const scan = await prisma.scan.findUnique({
     where: { id },
-    include: { chartFindings: true, imageFindings: true },
+    include: { chartFindings: true, imageFindings: true, cveFindings: true },
   });
   if (!scan) throw new ScanNotFoundError(`Scan ${id} not found`);
   return toScanDetail(scan);
