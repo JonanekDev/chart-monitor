@@ -44,8 +44,7 @@ const currentStep = computed(() =>
 // Images are only known once the "images" step is over
 const imagesPending = computed(
   () =>
-    isInProgress.value &&
-    currentStep.value <= STEPS.findIndex((step) => step.phase === 'images'),
+    isInProgress.value && currentStep.value <= STEPS.findIndex((step) => step.phase === 'images'),
 );
 
 function stepStatus(index: number): StepStatus {
@@ -70,7 +69,9 @@ interface ImageWithCves extends ImageFinding {
 }
 
 function sortBySeverity(cves: CveFinding[]): CveFinding[] {
-  return [...cves].sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
+  return [...cves].sort(
+    (a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity),
+  );
 }
 
 interface ChartGroup {
@@ -157,6 +158,9 @@ onUnmounted(() => {
   <p v-if="error" class="text-muted">{{ error }}</p>
 
   <template v-else-if="scan">
+    <RouterLink to="/" class="back text-muted"
+      ><Icon icon="lucide:arrow-left" /> Monitors</RouterLink
+    >
     <div class="header-row">
       <div>
         <h1 class="mono">{{ scan.repoUrl }}</h1>
@@ -197,10 +201,15 @@ onUnmounted(() => {
 
     <p v-if="scan.errorMessage" class="error section">{{ scan.errorMessage }}</p>
 
-    <p v-if="!isInProgress && scan.state !== 'failed' && chartGroups.length === 0" class="text-muted">
+    <p
+      v-if="!isInProgress && scan.state !== 'failed' && chartGroups.length === 0"
+      class="text-muted"
+    >
       The scan finished but found no Helm chart. Applications with only git paths (plain manifests,
       kustomize) have no chart to check;{{ ' ' }}
-      <template v-if="scan.warnings?.length">the skipped items above explain what else was left out.</template>
+      <template v-if="scan.warnings?.length"
+        >the skipped items above explain what else was left out.</template
+      >
       <template v-else>nothing was skipped.</template>
     </p>
 
@@ -221,7 +230,11 @@ onUnmounted(() => {
           <template v-for="group in chartGroups" :key="group.key">
             <tr class="chart-row" @click="toggleIn(expandedKeys, group.key)">
               <td class="expand-cell">
-                <Icon :icon="expandedKeys.has(group.key) ? 'lucide:chevron-down' : 'lucide:chevron-right'" />
+                <Icon
+                  :icon="
+                    expandedKeys.has(group.key) ? 'lucide:chevron-down' : 'lucide:chevron-right'
+                  "
+                />
               </td>
               <td>
                 {{ group.chart.applicationName }}
@@ -233,9 +246,19 @@ onUnmounted(() => {
                 />
               </td>
               <td>{{ group.chart.chartName }}</td>
-              <td class="mono"><span class="truncate" :title="group.chart.currentVersion">{{ group.chart.currentVersion }}</span></td>
-              <td class="mono"><span class="truncate" :title="group.chart.latestVersion ?? undefined">{{ group.chart.latestVersion ?? '—' }}</span></td>
-              <td><span :class="`badge badge-${group.chart.status}`">{{ group.chart.status }}</span></td>
+              <td class="mono">
+                <span class="truncate" :title="group.chart.currentVersion">{{
+                  group.chart.currentVersion
+                }}</span>
+              </td>
+              <td class="mono">
+                <span class="truncate" :title="group.chart.latestVersion ?? undefined">{{
+                  group.chart.latestVersion ?? '—'
+                }}</span>
+              </td>
+              <td>
+                <span :class="`badge badge-${group.chart.status}`">{{ group.chart.status }}</span>
+              </td>
             </tr>
             <tr v-if="expandedKeys.has(group.key)" class="expanded-row">
               <td colspan="6">
@@ -243,81 +266,127 @@ onUnmounted(() => {
                   {{ imagesPending ? 'Finding images…' : 'No images found for this chart.' }}
                 </p>
                 <div v-else class="table-scroll">
-                <table class="nested-table">
-                  <thead>
-                    <tr>
-                      <th></th>
-                      <th>Image</th>
-                      <th>Current tag</th>
-                      <th>Latest tag</th>
-                      <th>Status</th>
-                      <th>Vulnerabilities</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <template v-for="image in group.images" :key="image.image">
-                      <tr
-                        :class="['image-row', { clickable: image.cves.length > 0 }]"
-                        @click="image.cves.length > 0 && toggleIn(expandedImageKeys, `${group.key}-${image.image}`)"
-                      >
-                        <td class="expand-cell">
-                          <Icon
-                            v-if="image.cves.length > 0"
-                            :icon="expandedImageKeys.has(`${group.key}-${image.image}`) ? 'lucide:chevron-down' : 'lucide:chevron-right'"
-                          />
-                        </td>
-                        <td>{{ image.image }}</td>
-                        <td class="mono"><span class="truncate" :title="image.currentTag">{{ image.currentTag }}</span></td>
-                        <td class="mono"><span class="truncate" :title="image.latestTag ?? undefined">{{ image.latestTag ?? '—' }}</span></td>
-                        <td><span :class="`badge badge-${image.status}`">{{ image.status }}</span></td>
-                        <td>
-                          <span
-                            v-for="severity in SEVERITY_ORDER.filter((s) => image.cveCounts[s])"
-                            :key="severity"
-                            :class="['cve-count', severity.toLowerCase()]"
-                            :title="`${image.cveCounts[severity]} ${severity} severity`"
-                          >
-                            {{ image.cveCounts[severity] }}
-                          </span>
-                          <span v-if="!image.vulnerabilitiesScanned" class="text-muted">
-                            {{ isInProgress ? 'scanning…' : 'not scanned' }}
-                          </span>
-                          <span v-else-if="image.cves.length === 0" class="text-muted">none</span>
-                        </td>
+                  <table class="nested-table">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>Image</th>
+                        <th>Current tag</th>
+                        <th>Latest tag</th>
+                        <th>Status</th>
+                        <th>Vulnerabilities</th>
                       </tr>
-                      <tr v-if="expandedImageKeys.has(`${group.key}-${image.image}`)" class="expanded-row">
-                        <td colspan="6">
-                          <div class="table-scroll">
-                          <table class="nested-table">
-                            <thead>
-                              <tr>
-                                <th>Vulnerability</th>
-                                <th>Package</th>
-                                <th>Installed</th>
-                                <th>Fixed</th>
-                                <th>Severity</th>
-                                <th>Title</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <tr v-for="cve in sortBySeverity(image.cves)" :key="cve.vulnerabilityId + cve.pkgName">
-                                <td class="mono">{{ cve.vulnerabilityId }}</td>
-                                <td><span class="truncate" :title="cve.pkgName">{{ cve.pkgName }}</span></td>
-                                <td class="mono"><span class="truncate" :title="cve.installedVersion">{{ cve.installedVersion }}</span></td>
-                                <td class="mono"><span class="truncate" :title="cve.fixedVersion ?? undefined">{{ cve.fixedVersion ?? '—' }}</span></td>
-                                <td>
-                                  <span :class="['severity-badge', cve.severity.toLowerCase()]">{{ cve.severity }}</span>
-                                </td>
-                                <td class="text-muted"><span class="truncate-title" :title="cve.title ?? undefined">{{ cve.title ?? '—' }}</span></td>
-                              </tr>
-                            </tbody>
-                          </table>
-                          </div>
-                        </td>
-                      </tr>
-                    </template>
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      <template v-for="image in group.images" :key="image.image">
+                        <tr
+                          :class="['image-row', { clickable: image.cves.length > 0 }]"
+                          @click="
+                            image.cves.length > 0 &&
+                            toggleIn(expandedImageKeys, `${group.key}-${image.image}`)
+                          "
+                        >
+                          <td class="expand-cell">
+                            <Icon
+                              v-if="image.cves.length > 0"
+                              :icon="
+                                expandedImageKeys.has(`${group.key}-${image.image}`)
+                                  ? 'lucide:chevron-down'
+                                  : 'lucide:chevron-right'
+                              "
+                            />
+                          </td>
+                          <td>{{ image.image }}</td>
+                          <td class="mono">
+                            <span class="truncate" :title="image.currentTag">{{
+                              image.currentTag
+                            }}</span>
+                          </td>
+                          <td class="mono">
+                            <span class="truncate" :title="image.latestTag ?? undefined">{{
+                              image.latestTag ?? '—'
+                            }}</span>
+                          </td>
+                          <td>
+                            <span :class="`badge badge-${image.status}`">{{ image.status }}</span>
+                          </td>
+                          <td>
+                            <span
+                              v-for="severity in SEVERITY_ORDER.filter((s) => image.cveCounts[s])"
+                              :key="severity"
+                              :class="['cve-count', severity.toLowerCase()]"
+                              :title="`${image.cveCounts[severity]} ${severity} severity`"
+                            >
+                              {{ image.cveCounts[severity] }}
+                            </span>
+                            <span v-if="!image.vulnerabilitiesScanned" class="text-muted">
+                              {{ isInProgress ? 'scanning…' : 'not scanned' }}
+                            </span>
+                            <span v-else-if="image.cves.length === 0" class="text-muted">none</span>
+                          </td>
+                        </tr>
+                        <tr
+                          v-if="expandedImageKeys.has(`${group.key}-${image.image}`)"
+                          class="expanded-row"
+                        >
+                          <td colspan="6">
+                            <div class="table-scroll">
+                              <table class="nested-table">
+                                <thead>
+                                  <tr>
+                                    <th>Vulnerability</th>
+                                    <th>Package</th>
+                                    <th>Installed</th>
+                                    <th>Fixed</th>
+                                    <th>Severity</th>
+                                    <th>Title</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr
+                                    v-for="cve in sortBySeverity(image.cves)"
+                                    :key="cve.vulnerabilityId + cve.pkgName"
+                                  >
+                                    <td class="mono">{{ cve.vulnerabilityId }}</td>
+                                    <td>
+                                      <span class="truncate" :title="cve.pkgName">{{
+                                        cve.pkgName
+                                      }}</span>
+                                    </td>
+                                    <td class="mono">
+                                      <span class="truncate" :title="cve.installedVersion">{{
+                                        cve.installedVersion
+                                      }}</span>
+                                    </td>
+                                    <td class="mono">
+                                      <span
+                                        class="truncate"
+                                        :title="cve.fixedVersion ?? undefined"
+                                        >{{ cve.fixedVersion ?? '—' }}</span
+                                      >
+                                    </td>
+                                    <td>
+                                      <span
+                                        :class="['severity-badge', cve.severity.toLowerCase()]"
+                                        >{{ cve.severity }}</span
+                                      >
+                                    </td>
+                                    <td class="text-muted">
+                                      <span
+                                        class="truncate-title"
+                                        :title="cve.title ?? undefined"
+                                        >{{ cve.title ?? '—' }}</span
+                                      >
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
                 </div>
               </td>
             </tr>
@@ -329,6 +398,12 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
 .header-row {
   display: flex;
   justify-content: space-between;

@@ -153,6 +153,7 @@ th {
 }
 
 input,
+select,
 textarea {
   background-color: var(--color-bg-subtle);
   border: 1px solid var(--color-border);
@@ -165,6 +166,7 @@ textarea {
 }
 
 input:focus,
+select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--color-primary);
@@ -175,4 +177,35 @@ label {
   margin-bottom: var(--space-2);
   color: var(--color-text-muted);
   font-size: 0.9rem;
+}
+
+/* Small icon-only button, e.g. row actions. Always pair with aria-label. */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition:
+    color var(--transition),
+    border-color var(--transition);
+}
+
+.btn-icon:hover:not(:disabled) {
+  color: var(--color-primary);
+  border-color: var(--color-border);
+}
+
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-icon.danger:hover:not(:disabled) {
+  color: #ef4444;
 }

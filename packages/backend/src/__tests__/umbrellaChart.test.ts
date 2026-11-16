@@ -59,7 +59,9 @@ describe('expandUmbrellaChart', () => {
   });
 
   it('returns nothing, without warnings, for a plain manifests directory', async () => {
-    const { ctx, warnings } = testContext({ [repoUrl]: { ...files, 'manifests/deploy.yaml': 'kind: Deployment' } });
+    const { ctx, warnings } = testContext({
+      [repoUrl]: { ...files, 'manifests/deploy.yaml': 'kind: Deployment' },
+    });
     const source = { repoURL: repoUrl, path: 'manifests', targetRevision: 'main' };
     expect(await expandUmbrellaChart(source, [source], ctx)).toEqual([]);
     expect(warnings).toEqual([]);

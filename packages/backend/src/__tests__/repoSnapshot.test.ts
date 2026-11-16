@@ -16,9 +16,12 @@ describe('toCloneUrl', () => {
     expect(toCloneUrl(input)).toBe(expected);
   });
 
-  it.each(['file:///etc', 'ext::sh -c id', '/local/path', '-upload-pack=x'])('rejects %s', (input) => {
-    expect(() => toCloneUrl(input)).toThrow();
-  });
+  it.each(['file:///etc', 'ext::sh -c id', '/local/path', '-upload-pack=x'])(
+    'rejects %s',
+    (input) => {
+      expect(() => toCloneUrl(input)).toThrow();
+    },
+  );
 });
 
 describe('snapshotFromDir', () => {
@@ -41,7 +44,9 @@ describe('snapshotFromDir', () => {
     expect(snap.dirs.sort()).toEqual(['apps', 'apps/a']);
     expect(await snap.read('apps/a/values.yaml')).toBe('a: 1');
     await expect(snap.read('apps/link.yaml')).rejects.toThrow('File not found');
-    await expect(snap.read('../' + path.basename(outside) + '/secret')).rejects.toThrow('File not found');
+    await expect(snap.read('../' + path.basename(outside) + '/secret')).rejects.toThrow(
+      'File not found',
+    );
     await expect(snap.read(path.join(outside, 'secret'))).rejects.toThrow('File not found');
   });
 });
@@ -70,7 +75,11 @@ describe('parseGitCredentials', () => {
       parseGitCredentials(
         'https://oauth2:glpat-1@gitlab.com\n https://me:t2@gitea.local:3000/ignored/path,http://u:p@h',
       ),
-    ).toEqual(['https://oauth2:glpat-1@gitlab.com', 'https://me:t2@gitea.local:3000', 'http://u:p@h']);
+    ).toEqual([
+      'https://oauth2:glpat-1@gitlab.com',
+      'https://me:t2@gitea.local:3000',
+      'http://u:p@h',
+    ]);
     expect(parseGitCredentials(undefined)).toEqual([]);
     expect(parseGitCredentials('  ')).toEqual([]);
   });
@@ -104,7 +113,10 @@ describe('gitEnv with a credentials file', () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'cred-'));
     dirs.push(dir);
     const file = path.join(dir, 'credentials');
-    await writeFile(file, 'https://oauth2:glpat-1@gitlab.example.com\nhttps://me:t2@gitea.local:3000\n');
+    await writeFile(
+      file,
+      'https://oauth2:glpat-1@gitlab.example.com\nhttps://me:t2@gitea.local:3000\n',
+    );
 
     expect(await fill(file, 'gitlab.example.com')).toContain('password=glpat-1');
     expect(await fill(file, 'gitea.local:3000')).toContain('password=t2');

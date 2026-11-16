@@ -21,7 +21,7 @@ services:
       - backend_data:/data
       # - ./certs/internal-ca.crt:/certs/internal-ca.crt:ro
     ports:
-      - "${PORT:-3000}:3000"
+      - '${PORT:-3000}:3000'
     depends_on:
       - trivy
 

@@ -6,20 +6,6 @@ import {
   versionStatusSchema,
 } from './common.js';
 
-export const createScanRequestSchema = z.object({
-  repoUrl: z
-    .string()
-    .trim()
-    .regex(
-      /^(https?:\/\/|ssh:\/\/|[\w.-]+@[\w.-]+:)\S+$/,
-      'Enter a git URL: https://host/org/repo or git@host:org/repo.git',
-    ),
-  searchPath: z.string().optional(),
-  ref: z.string().optional(),
-});
-
-export type CreateScanRequest = z.infer<typeof createScanRequestSchema>;
-
 export const chartFindingSchema = z.object({
   applicationName: z.string(),
   applicationSetName: z.string(),
@@ -59,8 +45,18 @@ export const cveFindingSchema = z.object({
 
 export type CveFinding = z.infer<typeof cveFindingSchema>;
 
+/** Headline numbers for overview tables, so they don't need the full findings */
+export const scanCountsSchema = z.object({
+  outdatedCharts: z.number().int(),
+  critical: z.number().int(),
+  high: z.number().int(),
+});
+
+export type ScanCounts = z.infer<typeof scanCountsSchema>;
+
 export const scanSummarySchema = z.object({
   id: z.uuid(),
+  monitorId: z.uuid(),
   repoUrl: z.string(),
   state: scanStateSchema,
   createdAt: z.string().datetime(),
@@ -77,6 +73,7 @@ export const scanSummarySchema = z.object({
       detail: z.string().nullable(),
     })
     .nullable(),
+  counts: scanCountsSchema,
 });
 
 export type ScanSummary = z.infer<typeof scanSummarySchema>;

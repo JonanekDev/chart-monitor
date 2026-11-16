@@ -28,19 +28,18 @@ async function onLogout() {
         <span class="domain">scipak.eu</span>
       </RouterLink>
 
-      <nav>
-        <ul>
-          <li><RouterLink to="/">~/scans</RouterLink></li>
-          <li><RouterLink to="/scans/new">~/new-scan</RouterLink></li>
-        </ul>
-      </nav>
-
       <div class="actions">
         <button class="icon-button" aria-label="Toggle theme" @click="toggle">
           <Icon v-if="theme === 'light'" icon="lucide:moon" />
           <Icon v-else icon="lucide:sun" />
         </button>
-        <button v-if="showLogout" class="icon-button" aria-label="Log out" title="Log out" @click="onLogout">
+        <button
+          v-if="showLogout"
+          class="icon-button"
+          aria-label="Log out"
+          title="Log out"
+          @click="onLogout"
+        >
           <Icon icon="lucide:log-out" />
         </button>
       </div>
@@ -59,21 +58,6 @@ header .container {
   justify-content: space-between;
   align-items: center;
   padding: var(--space-4);
-}
-
-nav ul {
-  list-style: none;
-  display: flex;
-  gap: var(--space-6);
-}
-
-nav a {
-  color: var(--color-text-muted);
-  font-weight: 500;
-}
-
-nav a:hover {
-  color: var(--color-primary);
 }
 
 .actions {

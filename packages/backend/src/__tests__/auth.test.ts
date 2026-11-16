@@ -45,7 +45,10 @@ describe('auth', () => {
     expect(cookie).toMatchObject({ httpOnly: true, sameSite: 'Strict', path: '/' });
     expect(cookie.secure).toBeFalsy();
 
-    const authed = await app.inject({ url: '/api/scans/1', headers: { cookie: sessionCookie(res) } });
+    const authed = await app.inject({
+      url: '/api/scans/1',
+      headers: { cookie: sessionCookie(res) },
+    });
     expect(authed.json()).toEqual({ secret: 'data' });
   });
 
@@ -60,7 +63,9 @@ describe('auth', () => {
     const cookie = sessionCookie(await login(app, 'correct horse'));
     const [, signed] = cookie.split('=');
     const tampered = `${SESSION_COOKIE}=${String(Date.now() + 1e12)}.${signed!.split('.')[1]}`;
-    expect((await app.inject({ url: '/api/scans/1', headers: { cookie: tampered } })).statusCode).toBe(401);
+    expect(
+      (await app.inject({ url: '/api/scans/1', headers: { cookie: tampered } })).statusCode,
+    ).toBe(401);
 
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31 * 24 * 60 * 60 * 1000);
     expect((await app.inject({ url: '/api/scans/1', headers: { cookie } })).statusCode).toBe(401);
@@ -69,7 +74,9 @@ describe('auth', () => {
   it('logs everyone out when the password hash changes', async () => {
     const cookie = sessionCookie(await login(await buildApp(), 'correct horse'));
     const afterChange = await buildApp({ passwordHash: bcrypt.hashSync('new password', 4) });
-    expect((await afterChange.inject({ url: '/api/scans/1', headers: { cookie } })).statusCode).toBe(401);
+    expect(
+      (await afterChange.inject({ url: '/api/scans/1', headers: { cookie } })).statusCode,
+    ).toBe(401);
   });
 
   it('rate-limits login attempts', async () => {
@@ -81,10 +88,16 @@ describe('auth', () => {
 
   it('reports the session state and lets everything through when disabled', async () => {
     const app = await buildApp();
-    expect((await app.inject('/api/session')).json()).toEqual({ authEnabled: true, authenticated: false });
+    expect((await app.inject('/api/session')).json()).toEqual({
+      authEnabled: true,
+      authenticated: false,
+    });
 
     const open = await buildApp({ disabled: true, passwordHash: undefined });
     expect((await open.inject('/api/scans/1')).statusCode).toBe(200);
-    expect((await open.inject('/api/session')).json()).toEqual({ authEnabled: false, authenticated: true });
+    expect((await open.inject('/api/session')).json()).toEqual({
+      authEnabled: false,
+      authenticated: true,
+    });
   });
 });

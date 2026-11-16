@@ -5,7 +5,17 @@ const router = createRouter({
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue') },
     { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
-    { path: '/scans/new', name: 'new-scan', component: () => import('../views/NewScanView.vue') },
+    {
+      path: '/monitors/new',
+      name: 'new-monitor',
+      component: () => import('../views/MonitorFormView.vue'),
+    },
+    {
+      path: '/monitors/:id/edit',
+      name: 'edit-monitor',
+      component: () => import('../views/MonitorFormView.vue'),
+      props: true,
+    },
     {
       path: '/scans/:id',
       name: 'scan-detail',

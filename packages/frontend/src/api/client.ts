@@ -1,10 +1,14 @@
 import {
-  createScanRequestSchema,
+  monitorSchema,
   scanDetailSchema,
   scanSummarySchema,
-  type CreateScanRequest,
+  schedulePreviewSchema,
+  type Monitor,
+  type MonitorInput,
+  type MonitorUpdate,
   type ScanDetail,
   type ScanSummary,
+  type SchedulePreview,
 } from '@chart-monitor/shared';
 import { z } from 'zod';
 
@@ -21,12 +25,20 @@ async function request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit
   // Same origin: the backend serves this UI (`pnpm dev` proxies /api to it, see vite.config.ts)
   const response = await fetch(path, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    // Only with a body: the server rejects an empty body declared as JSON (e.g. "Run now", delete)
+    headers: { ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
   });
   if (response.status === 401) redirectToLogin();
   if (!response.ok) {
-    throw new ApiError(`Request to ${path} failed with status ${response.status}`);
+    // The API explains 400/404/409 in `error`; fall back to the status for anything else
+    const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    throw new ApiError(
+      typeof body?.error === 'string'
+        ? body.error
+        : `Request to ${path} failed with status ${response.status}`,
+    );
   }
+  if (response.status === 204) return schema.parse(undefined);
   return schema.parse(await response.json());
 }
 
@@ -45,7 +57,8 @@ export async function login(password: string): Promise<boolean> {
     body: JSON.stringify({ password }),
   });
   if (response.status === 401) return false;
-  if (response.status === 429) throw new ApiError('Too many attempts, wait a minute and try again.');
+  if (response.status === 429)
+    throw new ApiError('Too many attempts, wait a minute and try again.');
   if (!response.ok) throw new ApiError(`Login failed with status ${response.status}`);
   return true;
 }
@@ -54,13 +67,34 @@ export async function logout(): Promise<void> {
   await fetch('/api/logout', { method: 'POST' });
 }
 
-export function createScan(input: CreateScanRequest): Promise<ScanSummary> {
-  const body = createScanRequestSchema.parse(input);
-  return request('/api/scans', scanSummarySchema, { method: 'POST', body: JSON.stringify(body) });
+export function listMonitors(): Promise<Monitor[]> {
+  return request('/api/monitors', z.array(monitorSchema));
 }
 
-export function listScans(): Promise<ScanSummary[]> {
-  return request('/api/scans', z.array(scanSummarySchema));
+export function createMonitor(input: MonitorInput): Promise<Monitor> {
+  return request('/api/monitors', monitorSchema, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateMonitor(id: string, patch: MonitorUpdate): Promise<Monitor> {
+  return request(`/api/monitors/${id}`, monitorSchema, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteMonitor(id: string): Promise<void> {
+  return request(`/api/monitors/${id}`, z.undefined(), { method: 'DELETE' });
+}
+
+export function runMonitor(id: string): Promise<ScanSummary> {
+  return request(`/api/monitors/${id}/scans`, scanSummarySchema, { method: 'POST' });
+}
+
+export function previewSchedule(expression: string): Promise<SchedulePreview> {
+  return request(
+    `/api/schedule-preview?expression=${encodeURIComponent(expression)}`,
+    schedulePreviewSchema,
+  );
 }
 
 export function getScan(id: string): Promise<ScanDetail> {

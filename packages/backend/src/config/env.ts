@@ -38,6 +38,10 @@ const envSchema = z.object({
     .transform((val) => val?.trim() || undefined),
   /** Turns the login off, for setups that already authenticate in front of the app (SSO proxy) */
   AUTH_DISABLED: booleanFlag,
+  /** Time zone schedules are interpreted in. Node applies TZ itself; it's only validated here. */
+  TZ: z.string().default('UTC'),
+  /** Scans kept per monitor; older ones are deleted after each scan */
+  SCAN_RETENTION: z.coerce.number().int().min(1).default(10),
 });
 
 const HASH_HELP =
@@ -55,6 +59,11 @@ function loadEnv() {
       `ADMIN_PASSWORD_HASH is not set. ${HASH_HELP}\n` +
         'Or set AUTH_DISABLED=true if something in front of the app already handles login.',
     );
+  }
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: result.data.TZ });
+  } catch {
+    throw new ConfigError(`TZ "${result.data.TZ}" is not a valid time zone, e.g. Europe/Prague`);
   }
   if (ADMIN_PASSWORD_HASH && !BCRYPT_HASH.test(ADMIN_PASSWORD_HASH)) {
     throw new ConfigError(

@@ -41,5 +41,7 @@ export function compareVersions(current: string, latest: string | null): Version
   const latestCoerced = coerceVersion(latest);
   if (!currentCoerced || !latestCoerced) return VersionStatus.UNKNOWN;
 
-  return semver.gte(currentCoerced, latestCoerced) ? VersionStatus.UP_TO_DATE : VersionStatus.OUTDATED;
+  return semver.gte(currentCoerced, latestCoerced)
+    ? VersionStatus.UP_TO_DATE
+    : VersionStatus.OUTDATED;
 }

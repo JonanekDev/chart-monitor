@@ -59,7 +59,9 @@ async function expandGitFilesGenerator(
       const parsed: unknown = parse(await repo.read(path));
       const items = Array.isArray(parsed) ? parsed : [parsed];
       return items
-        .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+        .filter(
+          (item): item is Record<string, unknown> => typeof item === 'object' && item !== null,
+        )
         .map((item) => flattenParams(item));
     }),
   );
@@ -118,8 +120,7 @@ async function expandMatrixGenerator(
     firstSets.map(async (firstParams) => {
       const substituted = substituteTemplate(second, firstParams).value;
       const key = JSON.stringify(substituted);
-      if (!secondCache.has(key))
-        secondCache.set(key, expandWithValues(substituted, ctx));
+      if (!secondCache.has(key)) secondCache.set(key, expandWithValues(substituted, ctx));
       const secondSets = await secondCache.get(key)!;
       return secondSets.map((secondParams) => ({ ...firstParams, ...secondParams }));
     }),

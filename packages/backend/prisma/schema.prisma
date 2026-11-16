@@ -28,8 +28,25 @@ enum CveSeverity {
   CRITICAL
 }
 
+/// A repo that is scanned on a schedule (or on demand)
+model Monitor {
+  id         String   @id @default(uuid())
+  repoUrl    String
+  searchPath String?
+  ref        String?
+  /// Cron expression in the server's TZ; null = manual runs only
+  schedule   String?
+  /// false = paused (schedule doesn't fire)
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  scans      Scan[]
+}
+
 model Scan {
   id             String          @id @default(uuid())
+  monitor        Monitor         @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  monitorId      String
+  /// repoUrl/searchPath/ref as scanned (the monitor may be edited later)
   repoUrl        String
   searchPath     String?
   ref            String?
@@ -47,6 +64,8 @@ model Scan {
   chartFindings  ChartFinding[]
   imageFindings  ImageFinding[]
   cveFindings    CveFinding[]
+
+  @@index([monitorId, createdAt])
 }
 
 model ChartFinding {

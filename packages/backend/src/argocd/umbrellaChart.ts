@@ -31,7 +31,10 @@ export async function expandUmbrellaChart(
   if (source.chart || source.path === undefined) return [];
 
   const repo = await ctx.openRepo(source.repoURL, source.targetRevision);
-  const dir = posix.normalize(source.path).replace(/^\.?\/+|\/+$/g, '').replace(/^\.$/, '');
+  const dir = posix
+    .normalize(source.path)
+    .replace(/^\.?\/+|\/+$/g, '')
+    .replace(/^\.$/, '');
   const inDir = (file: string) => (dir ? `${dir}/${file}` : file);
   if (!repo.files.includes(inDir('Chart.yaml'))) return [];
 

@@ -7,6 +7,9 @@ import { scanRoutes } from './routes/scans.js';
 import { prisma } from './db/client.js';
 import { failInterruptedScans } from './scan/scanService.js';
 import { loadSessionSecret, setupAuth } from './auth/auth.js';
+import { monitorRoutes } from './routes/monitors.js';
+import { Scheduler } from './monitor/scheduler.js';
+import { runScheduled, startScheduler, type MonitorDeps } from './monitor/monitorService.js';
 
 // Built frontend, resolved from src/ or dist/ alike. Missing during `pnpm dev`, where Vite serves
 // the UI itself and proxies /api here.
@@ -25,7 +28,14 @@ await setupAuth(app, {
 });
 if (env.AUTH_DISABLED) app.log.warn('AUTH_DISABLED=true: the app is reachable without login');
 
+const scheduler = new Scheduler((monitorId) => runScheduled(deps, monitorId));
+const deps: MonitorDeps = { prisma, scheduler, retention: env.SCAN_RETENTION };
+
 await app.register(scanRoutes);
+await app.register(monitorRoutes(deps));
+
+const scheduled = await startScheduler(deps);
+app.log.info(`Scheduled ${scheduled} monitor(s), time zone ${env.TZ}`);
 
 if (existsSync(FRONTEND_DIST)) {
   await app.register(fastifyStatic, {
@@ -54,6 +64,7 @@ if (existsSync(FRONTEND_DIST)) {
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
     app.log.info(`${signal} received, shutting down`);
+    scheduler.stopAll();
     void app.close().finally(() => process.exit(0));
   });
 }

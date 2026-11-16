@@ -1,7 +1,7 @@
 # Chart Monitor
 
-Point it at a GitOps repo and it finds the ArgoCD `Application`s and `ApplicationSet`s, then checks
-every Helm chart they deploy:
+Add a GitOps repo as a monitor and it is scanned on a schedule (or on demand): the app finds the
+ArgoCD `Application`s and `ApplicationSet`s, then checks every Helm chart they deploy:
 
 - is there a newer chart version?
 - are there newer tags for the images the chart renders (with the app's own values)?
@@ -23,14 +23,16 @@ Open http://localhost:3000 and log in with your password.
 
 All settings go in `.env` in the repo root.
 
-| Variable              | Purpose                                                                                     |
-| --------------------- | ------------------------------------------------------------------------------------------- |
-| `ADMIN_PASSWORD_HASH` | **Required.** bcrypt hash of the login password, in single quotes (see below).              |
-| `AUTH_DISABLED`       | `true` turns the login off, for setups with SSO in front of the app (default `false`).      |
-| `GITHUB_TOKEN`        | Private GitHub repos. Fine-grained token, *Contents: Read-only*.                            |
-| `GIT_CREDENTIALS`     | Private repos on other hosts, comma-separated `https://user:token@host` (see below).        |
-| `PORT`                | Port the app is published on (default `3000`).                                              |
-| `INCLUDE_PRERELEASES` | Also treat pre-release versions (`1.2.0-rc.1`) as updates (default `false`).                |
+| Variable              | Purpose                                                                                |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| `ADMIN_PASSWORD_HASH` | **Required.** bcrypt hash of the login password, in single quotes (see below).         |
+| `AUTH_DISABLED`       | `true` turns the login off, for setups with SSO in front of the app (default `false`). |
+| `GITHUB_TOKEN`        | Private GitHub repos. Fine-grained token, _Contents: Read-only_.                       |
+| `GIT_CREDENTIALS`     | Private repos on other hosts, comma-separated `https://user:token@host` (see below).   |
+| `TZ`                  | Time zone for scan schedules, e.g. `Europe/Prague` (default `UTC`).                    |
+| `SCAN_RETENTION`      | Scans kept per monitor; older ones are deleted (default `10`).                         |
+| `PORT`                | Port the app is published on (default `3000`).                                         |
+| `INCLUDE_PRERELEASES` | Also treat pre-release versions (`1.2.0-rc.1`) as updates (default `false`).           |
 
 Generate the password hash with `htpasswd` (package `apache2-utils` / `httpd-tools`):
 
@@ -55,7 +57,7 @@ ADMIN_PASSWORD_HASH='$2y$12$...'
 Changing the hash logs out every session.
 
 Each token is only ever sent to its own host. For `GIT_CREDENTIALS` use user `oauth2` with a
-`read_repository` token on GitLab, and your username with a *repository: read* token on Gitea/Forgejo:
+`read_repository` token on GitLab, and your username with a _repository: read_ token on Gitea/Forgejo:
 
 ```
 GIT_CREDENTIALS=https://oauth2:glpat-xxx@gitlab.example.com,https://me:xxx@gitea.example.com

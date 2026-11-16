@@ -14,3 +14,7 @@ export class ArgoCdParseError extends AppError {}
 export class HelmResolutionError extends AppError {}
 export class TrivyScanError extends AppError {}
 export class ScanNotFoundError extends AppError {}
+export class NotFoundError extends AppError {}
+/** Bad input that passed the schema but not a semantic check (e.g. an invalid cron expression) */
+export class ValidationError extends AppError {}
+export class ConflictError extends AppError {}

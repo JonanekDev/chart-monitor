@@ -1,10 +1,13 @@
 import {
+  CveSeverity,
   ScanState,
+  VersionStatus,
+  type ScanCounts,
   type ScanDetail,
   type ScanPhaseValue,
   type ScanSummary,
 } from '@chart-monitor/shared';
-import type { Prisma, PrismaClient, Scan } from '../generated/prisma/client.js';
+import type { Monitor, Prisma, PrismaClient, Scan } from '../generated/prisma/client.js';
 import { ScanNotFoundError } from '../errors.js';
 import { executeScan, type ScanReporter } from './runScan.js';
 
@@ -12,9 +15,12 @@ type ScanWithFindings = Prisma.ScanGetPayload<{
   include: { chartFindings: true; imageFindings: true; cveFindings: true };
 }>;
 
-function toScanSummary(scan: Scan): ScanSummary {
+const NO_COUNTS: ScanCounts = { outdatedCharts: 0, critical: 0, high: 0 };
+
+export function toScanSummary(scan: Scan, counts: ScanCounts = NO_COUNTS): ScanSummary {
   return {
     id: scan.id,
+    monitorId: scan.monitorId,
     repoUrl: scan.repoUrl,
     state: scan.state as ScanSummary['state'],
     createdAt: scan.createdAt.toISOString(),
@@ -28,12 +34,47 @@ function toScanSummary(scan: Scan): ScanSummary {
           detail: scan.progressDetail,
         }
       : null,
+    counts,
   };
+}
+
+/** Headline numbers for many scans at once, counted in the DB rather than by loading findings */
+export async function countFindings(
+  prisma: PrismaClient,
+  scanIds: string[],
+): Promise<Map<string, ScanCounts>> {
+  const [charts, cves] = await Promise.all([
+    prisma.chartFinding.groupBy({
+      by: ['scanId'],
+      where: { scanId: { in: scanIds }, status: VersionStatus.OUTDATED },
+      _count: true,
+    }),
+    prisma.cveFinding.groupBy({
+      by: ['scanId', 'severity'],
+      where: {
+        scanId: { in: scanIds },
+        severity: { in: [CveSeverity.CRITICAL, CveSeverity.HIGH] },
+      },
+      _count: true,
+    }),
+  ]);
+
+  const counts = new Map(scanIds.map((id) => [id, { ...NO_COUNTS }]));
+  for (const row of charts) counts.get(row.scanId)!.outdatedCharts = row._count;
+  for (const row of cves) {
+    counts.get(row.scanId)![row.severity === CveSeverity.CRITICAL ? 'critical' : 'high'] =
+      row._count;
+  }
+  return counts;
 }
 
 function toScanDetail(scan: ScanWithFindings): ScanDetail {
   return {
-    ...toScanSummary(scan),
+    ...toScanSummary(scan, {
+      outdatedCharts: scan.chartFindings.filter((f) => f.status === VersionStatus.OUTDATED).length,
+      critical: scan.cveFindings.filter((f) => f.severity === CveSeverity.CRITICAL).length,
+      high: scan.cveFindings.filter((f) => f.severity === CveSeverity.HIGH).length,
+    }),
     warnings: JSON.parse(scan.warnings) as string[],
     chartFindings: scan.chartFindings.map((f) => ({
       applicationName: f.applicationName,
@@ -67,17 +108,11 @@ function toScanDetail(scan: ScanWithFindings): ScanDetail {
   };
 }
 
-export async function createScan(
-  prisma: PrismaClient,
-  input: { repoUrl: string; searchPath?: string; ref?: string },
-): Promise<ScanSummary> {
-  const scan = await prisma.scan.create({
-    data: { repoUrl: input.repoUrl, searchPath: input.searchPath, ref: input.ref },
-  });
-
-  void runInBackground(prisma, scan.id, input);
-
-  return toScanSummary(scan);
+// Scans run one at a time: several schedules firing together would otherwise all hit trivy and
+// the network at once. Waiting scans sit in the `pending` state, which the UI already shows.
+let queueTail: Promise<unknown> = Promise.resolve();
+function enqueue(job: () => Promise<void>): void {
+  queueTail = queueTail.then(job).catch(() => {});
 }
 
 /** Persists everything as it arrives, so the UI (polling the scan) fills in step by step */
@@ -103,24 +138,28 @@ function databaseReporter(prisma: PrismaClient, scanId: string): ScanReporter {
   };
 }
 
-async function runInBackground(
-  prisma: PrismaClient,
-  scanId: string,
-  input: { repoUrl: string; searchPath?: string; ref?: string },
-): Promise<void> {
-  await prisma.scan.update({ where: { id: scanId }, data: { state: ScanState.RUNNING } });
+async function runScan(prisma: PrismaClient, scan: Scan): Promise<void> {
+  await prisma.scan.update({ where: { id: scan.id }, data: { state: ScanState.RUNNING } });
 
   try {
-    await executeScan(input, databaseReporter(prisma, scanId));
+    await executeScan(
+      {
+        repoUrl: scan.repoUrl,
+        searchPath: scan.searchPath ?? undefined,
+        ref: scan.ref ?? undefined,
+      },
+      databaseReporter(prisma, scan.id),
+    );
     await prisma.scan.update({
-      where: { id: scanId },
+      where: { id: scan.id },
       data: { state: ScanState.SUCCEEDED, finishedAt: new Date(), phase: null },
     });
   } catch (error) {
-    console.error(`[Scan ${scanId}] Scan execution failed:`, error);
-    // `phase` is kept, so the UI can tell in which step it failed; partial findings stay too
-    await prisma.scan.update({
-      where: { id: scanId },
+    console.error(`[Scan ${scan.id}] Scan execution failed:`, error);
+    // `phase` is kept, so the UI can tell in which step it failed; partial findings stay too.
+    // updateMany: the monitor (and with it this scan) may have been deleted meanwhile.
+    await prisma.scan.updateMany({
+      where: { id: scan.id },
       data: {
         state: ScanState.FAILED,
         finishedAt: new Date(),
@@ -128,6 +167,46 @@ async function runInBackground(
       },
     });
   }
+}
+
+/** Keeps the newest `keep` scans of a monitor; findings go with them (cascade) */
+export async function pruneScans(
+  prisma: PrismaClient,
+  monitorId: string,
+  keep: number,
+): Promise<number> {
+  const old = await prisma.scan.findMany({
+    where: { monitorId },
+    orderBy: { createdAt: 'desc' },
+    skip: keep,
+    select: { id: true },
+  });
+  if (old.length === 0) return 0;
+  const { count } = await prisma.scan.deleteMany({ where: { id: { in: old.map((s) => s.id) } } });
+  return count;
+}
+
+/** Queues a scan of the monitor's current settings; it starts once earlier scans are done */
+export async function createScan(
+  prisma: PrismaClient,
+  monitor: Monitor,
+  retention: number,
+): Promise<ScanSummary> {
+  const scan = await prisma.scan.create({
+    data: {
+      monitorId: monitor.id,
+      repoUrl: monitor.repoUrl,
+      searchPath: monitor.searchPath,
+      ref: monitor.ref,
+    },
+  });
+
+  enqueue(async () => {
+    await runScan(prisma, scan);
+    await pruneScans(prisma, monitor.id, retention);
+  });
+
+  return toScanSummary(scan);
 }
 
 /** Scans run in-process, so a restart kills them; without this they'd show as running forever */
@@ -141,11 +220,6 @@ export async function failInterruptedScans(prisma: PrismaClient): Promise<number
     },
   });
   return count;
-}
-
-export async function listScans(prisma: PrismaClient): Promise<ScanSummary[]> {
-  const scans = await prisma.scan.findMany({ orderBy: { createdAt: 'desc' } });
-  return scans.map(toScanSummary);
 }
 
 export async function getScan(prisma: PrismaClient, id: string): Promise<ScanDetail> {

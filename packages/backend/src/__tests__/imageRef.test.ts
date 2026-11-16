@@ -35,7 +35,9 @@ describe('parseImageRef', () => {
   });
 
   it('extracts the tag even when a digest is also pinned (tag@digest)', () => {
-    expect(parseImageRef('quay.io/cilium/cilium:v1.19.5@sha256:20fbbc14ac20b55a292c0dcda5571bf')).toEqual({
+    expect(
+      parseImageRef('quay.io/cilium/cilium:v1.19.5@sha256:20fbbc14ac20b55a292c0dcda5571bf'),
+    ).toEqual({
       registryHost: 'quay.io',
       repoPath: 'cilium/cilium',
       tag: 'v1.19.5',
