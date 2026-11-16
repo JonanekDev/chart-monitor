@@ -6,6 +6,7 @@ import { env } from './config/env.js';
 import { scanRoutes } from './routes/scans.js';
 import { prisma } from './db/client.js';
 import { failInterruptedScans } from './scan/scanService.js';
+import { loadSessionSecret, setupAuth } from './auth/auth.js';
 
 // Built frontend, resolved from src/ or dist/ alike. Missing during `pnpm dev`, where Vite serves
 // the UI itself and proxies /api here.
@@ -15,6 +16,14 @@ const app = Fastify({ logger: true });
 
 const interrupted = await failInterruptedScans(prisma);
 if (interrupted > 0) app.log.warn(`Marked ${interrupted} interrupted scan(s) as failed`);
+
+// Before any routes: the login guard must see every /api route
+await setupAuth(app, {
+  passwordHash: env.ADMIN_PASSWORD_HASH,
+  disabled: env.AUTH_DISABLED,
+  secret: await loadSessionSecret(prisma),
+});
+if (env.AUTH_DISABLED) app.log.warn('AUTH_DISABLED=true: the app is reachable without login');
 
 await app.register(scanRoutes);
 

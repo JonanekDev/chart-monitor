@@ -12,11 +12,12 @@ Works with any git host (GitHub, GitLab, Gitea/Forgejo, self-hosted).
 ## Quick start
 
 ```bash
-cp .env.example .env   # optional, only needed for private repos or custom settings
+cp .env.example .env
+htpasswd -nBC 12 '' | cut -d: -f2   # asks for a password; put the output into ADMIN_PASSWORD_HASH
 docker compose up --build
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000 and log in with your password.
 
 ## Configuration
 
@@ -24,10 +25,34 @@ All settings go in `.env` in the repo root.
 
 | Variable              | Purpose                                                                                     |
 | --------------------- | ------------------------------------------------------------------------------------------- |
+| `ADMIN_PASSWORD_HASH` | **Required.** bcrypt hash of the login password, in single quotes (see below).              |
+| `AUTH_DISABLED`       | `true` turns the login off, for setups with SSO in front of the app (default `false`).      |
 | `GITHUB_TOKEN`        | Private GitHub repos. Fine-grained token, *Contents: Read-only*.                            |
 | `GIT_CREDENTIALS`     | Private repos on other hosts, comma-separated `https://user:token@host` (see below).        |
 | `PORT`                | Port the app is published on (default `3000`).                                              |
 | `INCLUDE_PRERELEASES` | Also treat pre-release versions (`1.2.0-rc.1`) as updates (default `false`).                |
+
+Generate the password hash with `htpasswd` (package `apache2-utils` / `httpd-tools`):
+
+```bash
+htpasswd -nBC 12 '' | cut -d: -f2
+```
+
+- `-n` print the result instead of writing a password file, `-B` use bcrypt, `-C 12` bcrypt cost
+- `''` empty user name: `htpasswd` prints `user:hash`, here `:$2y$12$...`
+- `cut -d: -f2` keeps what comes after the `:`, i.e. just the hash
+- it asks for the password, so it doesn't end up in your shell history
+
+Without `htpasswd` installed, run `docker run --rm -it httpd:alpine htpasswd -nBC 12 ''` and copy
+everything after the leading `:`.
+
+Put the hash in `.env` in single quotes, otherwise Docker Compose treats its `$` signs as variables:
+
+```
+ADMIN_PASSWORD_HASH='$2y$12$...'
+```
+
+Changing the hash logs out every session.
 
 Each token is only ever sent to its own host. For `GIT_CREDENTIALS` use user `oauth2` with a
 `read_repository` token on GitLab, and your username with a *repository: read* token on Gitea/Forgejo:
@@ -63,5 +88,5 @@ pnpm dev   # UI with hot reload on http://localhost:5173, API on :3000
 
 ## Security
 
-There is no authentication, and the app clones and fetches whatever URLs it is given. Run it on a
-trusted network or behind a reverse proxy with login.
+Anyone who can log in can make the app clone and fetch arbitrary URLs, so keep the password strong.
+Put the app behind HTTPS (a reverse proxy) when it is reachable from outside your network.

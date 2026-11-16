@@ -10,6 +10,14 @@ import { parseGitCredentials } from '../git/repoSnapshot.js';
 const ROOT_ENV_FILE = fileURLToPath(new URL('../../../../.env', import.meta.url));
 if (existsSync(ROOT_ENV_FILE)) process.loadEnvFile(ROOT_ENV_FILE);
 
+const booleanFlag = z
+  .string()
+  .default('false')
+  .transform((val) => val.toLowerCase() === 'true' || val === '1');
+
+// bcrypt modular format ($2a$/$2b$/$2y$, cost, 53 chars of salt+hash), as produced by htpasswd -B
+const BCRYPT_HASH = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().default('file:./chart-monitor.db'),
@@ -22,18 +30,49 @@ const envSchema = z.object({
   /** Optional. Tokens for private repos on any git host: `https://user:token@host`, one per line
    * (or comma-separated). Each token is only sent to its own host. */
   GIT_CREDENTIALS: z.string().optional().transform(parseGitCredentials),
-  INCLUDE_PRERELEASES: z
+  INCLUDE_PRERELEASES: booleanFlag,
+  /** bcrypt hash of the login password. Required unless AUTH_DISABLED. */
+  ADMIN_PASSWORD_HASH: z
     .string()
-    .default('false')
-    .transform((val) => val.toLowerCase() === 'true' || val === '1'),
+    .optional()
+    .transform((val) => val?.trim() || undefined),
+  /** Turns the login off, for setups that already authenticate in front of the app (SSO proxy) */
+  AUTH_DISABLED: booleanFlag,
 });
+
+const HASH_HELP =
+  "Generate one with: htpasswd -nBC 12 '' | cut -d: -f2\n" +
+  "and put it in .env in single quotes (so the $ signs stay intact): ADMIN_PASSWORD_HASH='$2y$12$...'";
 
 function loadEnv() {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     throw new ConfigError(`Invalid environment configuration: ${result.error.message}`);
   }
+  const { ADMIN_PASSWORD_HASH, AUTH_DISABLED } = result.data;
+  if (!AUTH_DISABLED && !ADMIN_PASSWORD_HASH) {
+    throw new ConfigError(
+      `ADMIN_PASSWORD_HASH is not set. ${HASH_HELP}\n` +
+        'Or set AUTH_DISABLED=true if something in front of the app already handles login.',
+    );
+  }
+  if (ADMIN_PASSWORD_HASH && !BCRYPT_HASH.test(ADMIN_PASSWORD_HASH)) {
+    throw new ConfigError(
+      `ADMIN_PASSWORD_HASH is not a valid bcrypt hash (unquoted $ signs get mangled). ${HASH_HELP}`,
+    );
+  }
   return result.data;
 }
 
-export const env = loadEnv();
+function loadEnvOrExit() {
+  try {
+    return loadEnv();
+  } catch (error) {
+    // A config mistake is for the person running the app: print the advice, not a stack trace
+    if (!(error instanceof ConfigError)) throw error;
+    console.error(`\nConfiguration error: ${error.message}\n`);
+    process.exit(1);
+  }
+}
+
+export const env = loadEnvOrExit();

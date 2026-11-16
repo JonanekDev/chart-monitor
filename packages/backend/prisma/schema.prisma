@@ -95,3 +95,9 @@ model CveFinding {
 
   @@index([scanId])
 }
+
+/// Small key/value store for app-generated settings (e.g. the session signing secret)
+model AppSetting {
+  key   String @id
+  value String
+}
