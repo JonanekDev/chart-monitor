@@ -8,6 +8,7 @@ import { prisma } from './db/client.js';
 import { failInterruptedScans } from './scan/scanService.js';
 import { loadSessionSecret, setupAuth } from './auth/auth.js';
 import { monitorRoutes } from './routes/monitors.js';
+import { channelRoutes } from './routes/channels.js';
 import { Scheduler } from './monitor/scheduler.js';
 import { runScheduled, startScheduler, type MonitorDeps } from './monitor/monitorService.js';
 
@@ -29,10 +30,16 @@ await setupAuth(app, {
 if (env.AUTH_DISABLED) app.log.warn('AUTH_DISABLED=true: the app is reachable without login');
 
 const scheduler = new Scheduler((monitorId) => runScheduled(deps, monitorId));
-const deps: MonitorDeps = { prisma, scheduler, retention: env.SCAN_RETENTION };
+const deps: MonitorDeps = {
+  prisma,
+  scheduler,
+  retention: env.SCAN_RETENTION,
+  publicUrl: env.PUBLIC_URL,
+};
 
 await app.register(scanRoutes);
 await app.register(monitorRoutes(deps));
+await app.register(channelRoutes(prisma));
 
 const scheduled = await startScheduler(deps);
 app.log.info(`Scheduled ${scheduled} monitor(s), time zone ${env.TZ}`);

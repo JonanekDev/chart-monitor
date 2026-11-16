@@ -23,16 +23,17 @@ Open http://localhost:3000 and log in with your password.
 
 All settings go in `.env` in the repo root.
 
-| Variable              | Purpose                                                                                |
-| --------------------- | -------------------------------------------------------------------------------------- |
-| `ADMIN_PASSWORD_HASH` | **Required.** bcrypt hash of the login password, in single quotes (see below).         |
-| `AUTH_DISABLED`       | `true` turns the login off, for setups with SSO in front of the app (default `false`). |
-| `GITHUB_TOKEN`        | Private GitHub repos. Fine-grained token, _Contents: Read-only_.                       |
-| `GIT_CREDENTIALS`     | Private repos on other hosts, comma-separated `https://user:token@host` (see below).   |
-| `TZ`                  | Time zone for scan schedules, e.g. `Europe/Prague` (default `UTC`).                    |
-| `SCAN_RETENTION`      | Scans kept per monitor; older ones are deleted (default `10`).                         |
-| `PORT`                | Port the app is published on (default `3000`).                                         |
-| `INCLUDE_PRERELEASES` | Also treat pre-release versions (`1.2.0-rc.1`) as updates (default `false`).           |
+| Variable              | Purpose                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| `ADMIN_PASSWORD_HASH` | **Required.** bcrypt hash of the login password, in single quotes (see below).          |
+| `AUTH_DISABLED`       | `true` turns the login off, for setups with SSO in front of the app (default `false`).  |
+| `GITHUB_TOKEN`        | Private GitHub repos. Fine-grained token, _Contents: Read-only_.                        |
+| `GIT_CREDENTIALS`     | Private repos on other hosts, comma-separated `https://user:token@host` (see below).    |
+| `TZ`                  | Time zone for scan schedules, e.g. `Europe/Prague` (default `UTC`).                     |
+| `SCAN_RETENTION`      | Scans kept per monitor; older ones are deleted (default `10`).                          |
+| `PUBLIC_URL`          | Where the app is reachable, for links in notifications (e.g. `https://cm.example.com`). |
+| `PORT`                | Port the app is published on (default `3000`).                                          |
+| `INCLUDE_PRERELEASES` | Also treat pre-release versions (`1.2.0-rc.1`) as updates (default `false`).            |
 
 Generate the password hash with `htpasswd` (package `apache2-utils` / `httpd-tools`):
 
@@ -62,6 +63,11 @@ Each token is only ever sent to its own host. For `GIT_CREDENTIALS` use user `oa
 ```
 GIT_CREDENTIALS=https://oauth2:glpat-xxx@gitlab.example.com,https://me:xxx@gitea.example.com
 ```
+
+**Notifications:** add a Discord or JSON webhook channel under Settings (gear icon), then pick it in a
+monitor along with what to report: new vulnerabilities from a chosen severity (optionally only ones
+with a fix), new chart versions and failed scans. The first scan sends an overview, later scans only
+what is new since the previous one.
 
 **Internal CA:** if your git server or Helm repo uses a certificate from a private CA, uncomment the
 `EXTRA_CA_CERTS` lines in `docker-compose.yml` and mount the CA file there.

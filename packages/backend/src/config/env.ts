@@ -40,6 +40,13 @@ const envSchema = z.object({
   AUTH_DISABLED: booleanFlag,
   /** Time zone schedules are interpreted in. Node applies TZ itself; it's only validated here. */
   TZ: z.string().default('UTC'),
+  /** Where the app is reachable, for links in notifications (e.g. https://charts.example.com) */
+  PUBLIC_URL: z
+    .string()
+    .trim()
+    .optional()
+    .transform((val) => val || undefined)
+    .pipe(z.url().optional()),
   /** Scans kept per monitor; older ones are deleted after each scan */
   SCAN_RETENTION: z.coerce.number().int().min(1).default(10),
 });

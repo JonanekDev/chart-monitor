@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { monitorInputSchema, monitorUpdateSchema } from '@chart-monitor/shared';
 import { z } from 'zod';
-import { AppError, ConflictError, NotFoundError, ValidationError } from '../errors.js';
+import { sendAppError } from './errors.js';
 import {
   createMonitor,
   deleteMonitor,
@@ -12,21 +12,11 @@ import {
 } from '../monitor/monitorService.js';
 import { previewSchedule } from '../monitor/scheduler.js';
 
-const STATUS_BY_ERROR = new Map<new (...args: never[]) => AppError, number>([
-  [ValidationError, 400],
-  [NotFoundError, 404],
-  [ConflictError, 409],
-]);
-
 type IdParams = { Params: { id: string } };
 
 export function monitorRoutes(deps: MonitorDeps) {
   return async (app: FastifyInstance): Promise<void> => {
-    app.setErrorHandler((error, _request, reply) => {
-      const status = [...STATUS_BY_ERROR].find(([type]) => error instanceof type)?.[1];
-      if (status) return reply.status(status).send({ error: (error as Error).message });
-      throw error;
-    });
+    app.setErrorHandler(sendAppError);
 
     app.get('/api/monitors', async () => listMonitors(deps));
 

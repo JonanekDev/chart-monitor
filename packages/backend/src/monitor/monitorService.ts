@@ -1,6 +1,8 @@
 import {
   ScanState,
+  type ChartUpdateMode,
   type Monitor as MonitorDto,
+  type MonitorNotifications,
   type monitorInputSchema,
   type monitorUpdateSchema,
 } from '@chart-monitor/shared';
@@ -15,9 +17,39 @@ export interface MonitorDeps {
   scheduler: Scheduler;
   /** Scans kept per monitor */
   retention: number;
+  /** Base URL for links in notifications */
+  publicUrl?: string;
 }
 
 const withScans = { scans: { orderBy: { createdAt: 'desc' } } } as const;
+
+function toNotifications(m: Monitor): MonitorNotifications {
+  return {
+    channelId: m.channelId,
+    minSeverity: m.notifyMinSeverity as MonitorNotifications['minSeverity'],
+    onlyFixable: m.notifyOnlyFixable,
+    chartUpdates: m.notifyChartUpdates as ChartUpdateMode,
+    onFailure: m.notifyOnFailure,
+  };
+}
+
+/** API shape -> DB columns, after checking the chosen channel exists */
+async function notificationColumns(prisma: PrismaClient, n: MonitorNotifications | undefined) {
+  if (!n) return {};
+  if (
+    n.channelId &&
+    !(await prisma.notificationChannel.findUnique({ where: { id: n.channelId } }))
+  ) {
+    throw new ValidationError('Notification channel not found');
+  }
+  return {
+    channelId: n.channelId,
+    notifyMinSeverity: n.minSeverity,
+    notifyOnlyFixable: n.onlyFixable,
+    notifyChartUpdates: n.chartUpdates,
+    notifyOnFailure: n.onFailure,
+  };
+}
 
 async function toMonitorDtos(
   { prisma, scheduler }: MonitorDeps,
@@ -33,6 +65,7 @@ async function toMonitorDtos(
     searchPath: m.searchPath,
     ref: m.ref,
     schedule: m.schedule,
+    notifications: toNotifications(m),
     enabled: m.enabled,
     createdAt: m.createdAt.toISOString(),
     nextRunAt: scheduler.nextRunAt(m.id)?.toISOString() ?? null,
@@ -72,9 +105,12 @@ export async function createMonitor(
   input: z.output<typeof monitorInputSchema>,
 ): Promise<MonitorDto> {
   assertValidSchedule(input.schedule);
-  const monitor = await deps.prisma.monitor.create({ data: input });
+  const { notifications, ...fields } = input;
+  const monitor = await deps.prisma.monitor.create({
+    data: { ...fields, ...(await notificationColumns(deps.prisma, notifications)) },
+  });
   deps.scheduler.set(monitor);
-  await createScan(deps.prisma, monitor, deps.retention);
+  await createScan(deps.prisma, monitor, deps);
   return getMonitorDto(deps, monitor.id);
 }
 
@@ -85,7 +121,11 @@ export async function updateMonitor(
 ): Promise<MonitorDto> {
   await findMonitor(deps.prisma, id);
   if (patch.schedule !== undefined) assertValidSchedule(patch.schedule);
-  const monitor = await deps.prisma.monitor.update({ where: { id }, data: patch });
+  const { notifications, ...fields } = patch;
+  const monitor = await deps.prisma.monitor.update({
+    where: { id },
+    data: { ...fields, ...(await notificationColumns(deps.prisma, notifications)) },
+  });
   deps.scheduler.set(monitor);
   return getMonitorDto(deps, id);
 }
@@ -104,7 +144,7 @@ export async function runMonitor(deps: MonitorDeps, id: string) {
     where: { monitorId: id, state: { in: [ScanState.PENDING, ScanState.RUNNING] } },
   });
   if (active > 0) throw new ConflictError('A scan of this monitor is already queued or running');
-  return createScan(deps.prisma, monitor, deps.retention);
+  return createScan(deps.prisma, monitor, deps);
 }
 
 /** Scheduler callback: like a manual run, but a still-active previous scan just means "skip" */

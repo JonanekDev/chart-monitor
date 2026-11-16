@@ -6,11 +6,13 @@ import { getSession, logout } from '../api/client.js';
 
 const { theme, toggle } = useTheme();
 
-// Only shown when login is on and active (not with AUTH_DISABLED, not on the login page)
+// Hidden on the login page; logout only when login is on (not with AUTH_DISABLED)
 const showLogout = ref(false);
+const showSettings = ref(false);
 onMounted(async () => {
   const session = await getSession().catch(() => null);
   showLogout.value = Boolean(session?.authEnabled && session.authenticated);
+  showSettings.value = Boolean(session?.authenticated);
 });
 
 async function onLogout() {
@@ -29,6 +31,15 @@ async function onLogout() {
       </RouterLink>
 
       <div class="actions">
+        <RouterLink
+          v-if="showSettings"
+          to="/settings"
+          class="icon-button"
+          aria-label="Settings"
+          title="Settings"
+        >
+          <Icon icon="lucide:settings" />
+        </RouterLink>
         <button class="icon-button" aria-label="Toggle theme" @click="toggle">
           <Icon v-if="theme === 'light'" icon="lucide:moon" />
           <Icon v-else icon="lucide:sun" />

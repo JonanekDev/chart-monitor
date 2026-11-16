@@ -35,6 +35,7 @@ vi.mock('../scan/runScan.js', () => ({
 }));
 
 const { monitorRoutes } = await import('../routes/monitors.js');
+const { channelRoutes } = await import('../routes/channels.js');
 const { Scheduler } = await import('../monitor/scheduler.js');
 
 const dir = mkdtempSync(path.join(tmpdir(), 'monitors-test-'));
@@ -48,7 +49,10 @@ beforeAll(async () => {
     env: { ...process.env, DATABASE_URL: url },
   });
   prisma = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url }) });
-  await app.register(monitorRoutes({ prisma, scheduler, retention: 2 }));
+  await app.register(
+    monitorRoutes({ prisma, scheduler, retention: 2, publicUrl: 'https://cm.example.com' }),
+  );
+  await app.register(channelRoutes(prisma));
 }, 60_000);
 
 afterAll(async () => {
@@ -59,6 +63,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await prisma.monitor.deleteMany();
+  await prisma.notificationChannel.deleteMany();
 });
 
 // Finish every scan a test left behind, so the next test starts with an idle queue
@@ -186,5 +191,87 @@ describe('monitors API', () => {
     expect(
       (await app.inject({ method: 'DELETE', url: `/api/monitors/${monitor.id}` })).statusCode,
     ).toBe(404);
+  });
+});
+
+describe('notifications', () => {
+  it('notifies after a scan per the monitor rules, and only about news', async () => {
+    const sent: { url: string; body: Record<string, unknown> }[] = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      sent.push({ url: String(url), body: JSON.parse(String(init!.body)) });
+      return new Response(null, { status: 204 });
+    });
+
+    const channelRes = await app.inject({
+      method: 'POST',
+      url: '/api/channels',
+      payload: { name: 'ops', type: 'webhook', url: 'https://hooks.example.com/secret-token' },
+    });
+    expect(channelRes.statusCode).toBe(201);
+    const channel = channelRes.json();
+    expect(channel.urlPreview).toBe('https://hooks.example.com/…'); // token never returned
+
+    const monitor = await createMonitor({
+      repoUrl: 'https://github.com/o/r',
+      schedule: null,
+      notifications: {
+        channelId: channel.id,
+        minSeverity: 'HIGH',
+        onlyFixable: false,
+        chartUpdates: 'any',
+        onFailure: true,
+      },
+    });
+    expect(monitor.notifications.channelId).toBe(channel.id);
+
+    // First scan: one overview
+    await releaseNext();
+    await waitFor(async () => sent.length === 1);
+    expect(sent[0]!.url).toBe('https://hooks.example.com/secret-token');
+    expect(sent[0]!.body).toMatchObject({
+      kind: 'baseline',
+      repo: 'o/r',
+      scanUrl: `https://cm.example.com/scans/${monitor.scans[0]!.id}`,
+      summary: 'Monitoring started: 1 chart update, 1 critical, 2 high vulnerabilities',
+    });
+
+    // Same findings again: nothing to say
+    await app.inject({ method: 'POST', url: `/api/monitors/${monitor.id}/scans` });
+    await releaseNext();
+    await waitFor(async () => (await states(monitor.id)).every((st) => st === 'succeeded'));
+    expect(sent).toHaveLength(1);
+
+    // A failing test send is reported back, without the secret URL
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 500, statusText: 'Server Error' }));
+    const test = await app.inject({ method: 'POST', url: `/api/channels/${channel.id}/test` });
+    expect(test.statusCode).toBe(400);
+    expect(test.json().error).toBe('Sending failed: webhook answered 500 Server Error');
+    expect(test.body).not.toContain('secret-token');
+
+    // Deleting the channel turns the monitor's notifications off, the monitor stays
+    expect(
+      (await app.inject({ method: 'DELETE', url: `/api/channels/${channel.id}` })).statusCode,
+    ).toBe(204);
+    expect((await list())[0]!.notifications.channelId).toBeNull();
+    fetchSpy.mockRestore();
+  });
+
+  it('rejects a monitor pointing at an unknown channel', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/monitors',
+      payload: {
+        repoUrl: 'https://github.com/o/r',
+        schedule: null,
+        notifications: {
+          channelId: '00000000-0000-4000-8000-000000000000',
+          minSeverity: null,
+          onlyFixable: true,
+          chartUpdates: 'off',
+          onFailure: false,
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
   });
 });

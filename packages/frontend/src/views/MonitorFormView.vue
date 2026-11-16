@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { monitorInputSchema, type SchedulePreview } from '@chart-monitor/shared';
+import {
+  DEFAULT_NOTIFICATIONS,
+  monitorInputSchema,
+  type Channel,
+  type MonitorNotifications,
+  type SchedulePreview,
+} from '@chart-monitor/shared';
 import {
   ApiError,
   createMonitor,
+  listChannels,
   listMonitors,
   previewSchedule,
   updateMonitor,
@@ -22,6 +29,15 @@ const ref_ = ref('');
 // A preset's cron value, '' for manual only, or CUSTOM
 const scheduleChoice = ref<string>('0 3 * * *');
 const customSchedule = ref('');
+const notifications = ref<MonitorNotifications>({ ...DEFAULT_NOTIFICATIONS });
+const channels = ref<Channel[]>([]);
+
+const SEVERITY_OPTIONS: { label: string; value: MonitorNotifications['minSeverity'] }[] = [
+  { label: 'Off', value: null },
+  { label: 'Critical', value: 'CRITICAL' },
+  { label: 'High and critical', value: 'HIGH' },
+  { label: 'Medium and above', value: 'MEDIUM' },
+];
 
 const loadError = ref<string | null>(null);
 const fieldError = ref<string | null>(null);
@@ -33,6 +49,7 @@ const schedule = computed(() =>
 );
 
 onMounted(async () => {
+  channels.value = await listChannels().catch(() => []);
   if (!props.id) return;
   try {
     const monitor = (await listMonitors()).find((m) => m.id === props.id);
@@ -46,6 +63,7 @@ onMounted(async () => {
     const isPreset = SCHEDULE_PRESETS.some((p) => (p.value ?? '') === (monitor.schedule ?? ''));
     scheduleChoice.value = isPreset ? (monitor.schedule ?? '') : CUSTOM;
     customSchedule.value = isPreset ? '' : (monitor.schedule ?? '');
+    notifications.value = { ...monitor.notifications };
   } catch {
     loadError.value = 'Failed to load the monitor.';
   }
@@ -78,6 +96,7 @@ async function onSubmit() {
     searchPath: searchPath.value,
     ref: ref_.value,
     schedule: schedule.value,
+    notifications: notifications.value,
   });
   if (!parsed.success) {
     fieldError.value = parsed.error.issues[0]?.message ?? 'Invalid input';
@@ -169,6 +188,62 @@ async function onSubmit() {
       </p>
     </div>
 
+    <fieldset class="notifications">
+      <legend>Notifications</legend>
+      <div class="field">
+        <label for="channel">Send to</label>
+        <select id="channel" v-model="notifications.channelId">
+          <option :value="null">Nowhere (off)</option>
+          <option v-for="channel in channels" :key="channel.id" :value="channel.id">
+            {{ channel.name }}
+          </option>
+        </select>
+        <p v-if="channels.length === 0" class="text-muted hint">
+          No channels yet: add a Discord or webhook channel in
+          <RouterLink to="/settings">Settings</RouterLink>.
+        </p>
+      </div>
+
+      <template v-if="notifications.channelId">
+        <div class="field">
+          <label for="severity">New vulnerabilities</label>
+          <select id="severity" v-model="notifications.minSeverity">
+            <option v-for="option in SEVERITY_OPTIONS" :key="option.label" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
+        <label class="check">
+          <input
+            v-model="notifications.onlyFixable"
+            type="checkbox"
+            :disabled="!notifications.minSeverity"
+          />
+          Only vulnerabilities that have a fix available
+        </label>
+        <label class="check">
+          <input
+            type="checkbox"
+            :checked="notifications.chartUpdates === 'any'"
+            @change="
+              notifications.chartUpdates = ($event.target as HTMLInputElement).checked
+                ? 'any'
+                : 'off'
+            "
+          />
+          New chart versions
+        </label>
+        <label class="check">
+          <input v-model="notifications.onFailure" type="checkbox" />
+          Failed scans
+        </label>
+        <p class="text-muted hint">
+          The first scan sends an overview; after that only what is new since the previous scan, so
+          an unchanged repo stays quiet.
+        </p>
+      </template>
+    </fieldset>
+
     <p v-if="fieldError" class="error">{{ fieldError }}</p>
     <p v-if="submitError" class="error">{{ submitError }}</p>
 
@@ -201,6 +276,27 @@ async function onSubmit() {
 }
 .hint.error {
   margin-bottom: 0;
+}
+.notifications {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin: var(--space-6) 0;
+}
+.notifications legend {
+  padding: 0 var(--space-2);
+  color: var(--color-text-muted);
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  color: var(--color-text);
+  cursor: pointer;
+}
+.check input {
+  width: auto;
 }
 .buttons {
   display: flex;

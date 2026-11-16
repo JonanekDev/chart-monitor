@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { scanSummarySchema } from './scan.js';
+import { monitorNotificationsSchema } from './notification.js';
 
 // Empty form fields mean "not set"
 const optionalText = z
@@ -23,6 +24,8 @@ export const monitorInputSchema = z.object({
   ref: optionalText,
   /** Cron expression (in the server's TZ); null = run manually only */
   schedule: optionalText,
+  /** Defaults to notifications off */
+  notifications: monitorNotificationsSchema.optional(),
 });
 
 export type MonitorInput = z.input<typeof monitorInputSchema>;
@@ -43,6 +46,7 @@ export const monitorSchema = z.object({
   enabled: z.boolean(),
   createdAt: z.string().datetime(),
   nextRunAt: z.string().datetime().nullable(),
+  notifications: monitorNotificationsSchema,
   /** Newest first; older ones are pruned (SCAN_RETENTION) */
   scans: z.array(scanSummarySchema),
 });

@@ -10,6 +10,7 @@ import {
 import type { Monitor, Prisma, PrismaClient, Scan } from '../generated/prisma/client.js';
 import { ScanNotFoundError } from '../errors.js';
 import { executeScan, type ScanReporter } from './runScan.js';
+import { notifyAfterScan } from '../notify/notifyAfterScan.js';
 
 type ScanWithFindings = Prisma.ScanGetPayload<{
   include: { chartFindings: true; imageFindings: true; cveFindings: true };
@@ -186,11 +187,18 @@ export async function pruneScans(
   return count;
 }
 
+export interface ScanOptions {
+  /** Scans kept per monitor */
+  retention: number;
+  /** Base URL for links in notifications */
+  publicUrl?: string;
+}
+
 /** Queues a scan of the monitor's current settings; it starts once earlier scans are done */
 export async function createScan(
   prisma: PrismaClient,
   monitor: Monitor,
-  retention: number,
+  { retention, publicUrl }: ScanOptions,
 ): Promise<ScanSummary> {
   const scan = await prisma.scan.create({
     data: {
@@ -203,6 +211,8 @@ export async function createScan(
 
   enqueue(async () => {
     await runScan(prisma, scan);
+    // Before pruning: the notification compares with the previous scan
+    await notifyAfterScan(prisma, scan.id, publicUrl);
     await pruneScans(prisma, monitor.id, retention);
   });
 

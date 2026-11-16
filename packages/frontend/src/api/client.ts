@@ -1,8 +1,11 @@
 import {
+  channelSchema,
   monitorSchema,
   scanDetailSchema,
   scanSummarySchema,
   schedulePreviewSchema,
+  type Channel,
+  type ChannelInput,
   type Monitor,
   type MonitorInput,
   type MonitorUpdate,
@@ -99,4 +102,21 @@ export function previewSchedule(expression: string): Promise<SchedulePreview> {
 
 export function getScan(id: string): Promise<ScanDetail> {
   return request(`/api/scans/${id}`, scanDetailSchema);
+}
+
+export function listChannels(): Promise<Channel[]> {
+  return request('/api/channels', z.array(channelSchema));
+}
+
+export function createChannel(input: ChannelInput): Promise<Channel> {
+  return request('/api/channels', channelSchema, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function deleteChannel(id: string): Promise<void> {
+  return request(`/api/channels/${id}`, z.undefined(), { method: 'DELETE' });
+}
+
+/** Rejects with the reason (e.g. "webhook answered 404") when the message can't be delivered */
+export function testChannel(id: string): Promise<void> {
+  return request(`/api/channels/${id}/test`, z.undefined(), { method: 'POST' });
 }

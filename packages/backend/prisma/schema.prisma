@@ -40,26 +40,48 @@ model Monitor {
   enabled    Boolean  @default(true)
   createdAt  DateTime @default(now())
   scans      Scan[]
+
+  /// Notifications: off while channelId is null (also when the channel gets deleted)
+  channel            NotificationChannel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  channelId          String?
+  /// CRITICAL | HIGH | MEDIUM; null = no CVE notifications
+  notifyMinSeverity  String?              @default("HIGH")
+  notifyOnlyFixable  Boolean              @default(true)
+  /// off | any
+  notifyChartUpdates String               @default("any")
+  notifyOnFailure    Boolean              @default(true)
+}
+
+/// Where notifications go; shared by monitors
+model NotificationChannel {
+  id        String    @id @default(uuid())
+  name      String
+  /// discord | webhook
+  type      String
+  /// Secret: anyone with it can post to the channel
+  url       String
+  createdAt DateTime  @default(now())
+  monitors  Monitor[]
 }
 
 model Scan {
-  id             String          @id @default(uuid())
-  monitor        Monitor         @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  id             String         @id @default(uuid())
+  monitor        Monitor        @relation(fields: [monitorId], references: [id], onDelete: Cascade)
   monitorId      String
   /// repoUrl/searchPath/ref as scanned (the monitor may be edited later)
   repoUrl        String
   searchPath     String?
   ref            String?
-  state          ScanState       @default(pending)
+  state          ScanState      @default(pending)
   errorMessage   String?
   /// JSON array of strings: everything skipped or failed during the scan
-  warnings       String          @default("[]")
+  warnings       String         @default("[]")
   /// Current step (ScanPhase); null once succeeded
   phase          String?
-  progressDone   Int             @default(0)
-  progressTotal  Int             @default(0)
+  progressDone   Int            @default(0)
+  progressTotal  Int            @default(0)
   progressDetail String?
-  createdAt      DateTime        @default(now())
+  createdAt      DateTime       @default(now())
   finishedAt     DateTime?
   chartFindings  ChartFinding[]
   imageFindings  ImageFinding[]
@@ -69,48 +91,48 @@ model Scan {
 }
 
 model ChartFinding {
-  id                  String        @id @default(uuid())
-  scan                Scan          @relation(fields: [scanId], references: [id], onDelete: Cascade)
-  scanId              String
-  applicationName     String
-  applicationSetName  String
-  chartName           String
-  repoUrl             String
-  currentVersion      String
-  latestVersion       String?
-  status              VersionStatus
-  note                String?
+  id                 String        @id @default(uuid())
+  scan               Scan          @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scanId             String
+  applicationName    String
+  applicationSetName String
+  chartName          String
+  repoUrl            String
+  currentVersion     String
+  latestVersion      String?
+  status             VersionStatus
+  note               String?
 
   @@index([scanId])
 }
 
 model ImageFinding {
-  id               String        @id @default(uuid())
-  scan             Scan          @relation(fields: [scanId], references: [id], onDelete: Cascade)
-  scanId           String
-  applicationName  String
-  image            String
-  currentTag       String
-  latestTag        String?
-  status           VersionStatus
-  note             String?
-  vulnerabilitiesScanned Boolean @default(false)
+  id                     String        @id @default(uuid())
+  scan                   Scan          @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scanId                 String
+  applicationName        String
+  image                  String
+  currentTag             String
+  latestTag              String?
+  status                 VersionStatus
+  note                   String?
+  vulnerabilitiesScanned Boolean       @default(false)
 
   @@index([scanId])
 }
 
 model CveFinding {
-  id                String       @id @default(uuid())
-  scan              Scan         @relation(fields: [scanId], references: [id], onDelete: Cascade)
-  scanId            String
-  applicationName   String
-  image             String
-  vulnerabilityId   String
-  pkgName           String
-  installedVersion  String
-  fixedVersion      String?
-  severity          CveSeverity
-  title             String?
+  id               String      @id @default(uuid())
+  scan             Scan        @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  scanId           String
+  applicationName  String
+  image            String
+  vulnerabilityId  String
+  pkgName          String
+  installedVersion String
+  fixedVersion     String?
+  severity         CveSeverity
+  title            String?
 
   @@index([scanId])
 }
