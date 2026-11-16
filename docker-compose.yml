@@ -1,56 +1,30 @@
-secrets:
-  github_app_key:
-    file: ./secrets/github-app-key.pem
-
 services:
-  postgres:
-    image: postgres:18-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: chart_monitor
-    volumes:
-      # postgres 18+ images want the volume at the parent dir, not .../data (see startup error otherwise)
-      - postgres_data:/var/lib/postgresql
-
   trivy:
-    image: aquasec/trivy:0.74.0
+    image: aquasec/trivy:0.76.2
     restart: unless-stopped
     command: server --listen 0.0.0.0:4954
     volumes:
       - trivy_cache:/root/.cache/trivy
 
-  backend:
-    build:
-      context: .
-      dockerfile: packages/backend/Dockerfile
+  app:
+    build: .
     restart: unless-stopped
     env_file:
-      - packages/backend/.env
+      - path: .env
+        required: false
     environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/chart_monitor
+      DATABASE_URL: file:/data/chart-monitor.db
       TRIVY_SERVER_URL: http://trivy:4954
-    secrets:
-      - github_app_key
+      # Self-hosted git / Helm repos with an internal CA: mount its PEM below and uncomment
+      # EXTRA_CA_CERTS: /certs/internal-ca.crt
+    volumes:
+      - backend_data:/data
+      # - ./certs/internal-ca.crt:/certs/internal-ca.crt:ro
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     depends_on:
-      - postgres
       - trivy
 
-  frontend:
-    build:
-      context: .
-      dockerfile: packages/frontend/Dockerfile
-      args:
-        VITE_API_URL: http://localhost:3000
-    restart: unless-stopped
-    ports:
-      - "5173:80"
-    depends_on:
-      - backend
-
 volumes:
-  postgres_data:
+  backend_data:
   trivy_cache:

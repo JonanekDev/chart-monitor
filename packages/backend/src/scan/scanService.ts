@@ -21,6 +21,7 @@ function toScanSummary(scan: Scan): ScanSummary {
 function toScanDetail(scan: ScanWithFindings): ScanDetail {
   return {
     ...toScanSummary(scan),
+    warnings: JSON.parse(scan.warnings) as string[],
     chartFindings: scan.chartFindings.map((f) => ({
       applicationName: f.applicationName,
       applicationSetName: f.applicationSetName,
@@ -86,10 +87,15 @@ async function runInBackground(
       }),
       prisma.scan.update({
         where: { id: scanId },
-        data: { state: ScanState.SUCCEEDED, finishedAt: new Date() },
+        data: {
+          state: ScanState.SUCCEEDED,
+          finishedAt: new Date(),
+          warnings: JSON.stringify(result.warnings),
+        },
       }),
     ]);
   } catch (error) {
+    console.error(`[Scan ${scanId}] Scan execution failed:`, error);
     await prisma.scan.update({
       where: { id: scanId },
       data: {

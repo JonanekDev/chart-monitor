@@ -3,5 +3,20 @@ node_modules
 dist
 **/dist
 .git
+
+# Secrets and local config: passed to containers at runtime (env_file / volumes), never baked in
 .env
 **/.env
+.env.*
+**/.env.*
+!**/.env.example
+secrets
+certs
+*.pem
+*.key
+
+# Local SQLite data (the container keeps its own on the /data volume)
+**/*.db
+**/*.db-journal
+**/*.db-wal
+**/*.db-shm

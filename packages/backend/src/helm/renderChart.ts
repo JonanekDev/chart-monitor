@@ -9,13 +9,27 @@ import { HelmResolutionError } from '../errors.js';
 
 const execFileAsync = promisify(execFile);
 
-function buildHelmArgs(source: ApplicationSource, valuesFilePath: string | null): string[] {
+// ArgoCD passes the cluster's real API versions; we don't have a cluster, so assume the CRDs charts
+// most often gate on (e.g. cilium refuses to render serviceMonitor.enabled without them).
+// ponytail: guessed list, extend when a chart fails validation on another CRD
+const ASSUMED_API_VERSIONS = [
+  'monitoring.coreos.com/v1',
+  'monitoring.coreos.com/v1/ServiceMonitor',
+  'monitoring.coreos.com/v1/PodMonitor',
+  'monitoring.coreos.com/v1/PrometheusRule',
+];
+
+function buildHelmArgs(source: ApplicationSource, valuesFilePaths: string[]): string[] {
   const isOci = source.repoURL.startsWith('oci://');
   const chartRef = isOci ? `${source.repoURL}/${source.chart}` : (source.chart as string);
 
   const args = ['template', 'release', chartRef, '--version', source.targetRevision as string];
   if (!isOci) args.push('--repo', source.repoURL);
-  if (valuesFilePath) args.push('-f', valuesFilePath);
+  for (const apiVersion of [...ASSUMED_API_VERSIONS, ...(source.helm?.apiVersions ?? [])]) {
+    args.push('--api-versions', apiVersion);
+  }
+  if (source.helm?.kubeVersion) args.push('--kube-version', source.helm.kubeVersion);
+  for (const filePath of valuesFilePaths) args.push('-f', filePath);
   for (const param of source.helm?.parameters ?? []) {
     args.push('--set', `${param.name}=${param.value}`);
   }
@@ -40,20 +54,25 @@ function collectImages(node: unknown, images: Set<string>): void {
 }
 
 /** Shells out to `helm template` to render the chart at its currently deployed version and
- * extracts every container image reference from the rendered manifests. */
-export async function renderChartImages(source: ApplicationSource): Promise<string[]> {
+ * extracts every container image reference from the rendered manifests. `valuesDocuments` are
+ * YAML values passed as `-f` in order, later ones overriding earlier ones. */
+export async function renderChartImages(
+  source: ApplicationSource,
+  valuesDocuments: string[] = [],
+): Promise<string[]> {
   if (!source.chart || !source.targetRevision) return [];
 
-  let valuesFilePath: string | null = null;
-  let tempDir: string | null = null;
-  if (source.helm?.values) {
-    tempDir = await mkdtemp(path.join(tmpdir(), 'chart-monitor-'));
-    valuesFilePath = path.join(tempDir, 'values.yaml');
-    await writeFile(valuesFilePath, source.helm.values, 'utf-8');
-  }
-
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'chart-monitor-'));
   try {
-    const { stdout } = await execFileAsync('helm', buildHelmArgs(source, valuesFilePath), {
+    const valuesFilePaths = await Promise.all(
+      valuesDocuments.map(async (content, i) => {
+        const filePath = path.join(tempDir, `values-${i}.yaml`);
+        await writeFile(filePath, content, 'utf-8');
+        return filePath;
+      }),
+    );
+
+    const { stdout } = await execFileAsync('helm', buildHelmArgs(source, valuesFilePaths), {
       maxBuffer: 1024 * 1024 * 20,
     });
 
@@ -68,6 +87,6 @@ export async function renderChartImages(source: ApplicationSource): Promise<stri
       cause,
     );
   } finally {
-    if (tempDir) await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true });
   }
 }

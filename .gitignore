@@ -6,5 +6,10 @@ dist/
 .env.*
 !.env.example
 *.log
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 .DS_Store
 /secrets/
+/certs/

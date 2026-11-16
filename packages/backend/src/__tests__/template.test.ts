@@ -20,4 +20,10 @@ describe('substituteTemplate', () => {
     expect(result.value).toBe('{{missing}}');
     expect(result.unresolvedKeys).toEqual(['missing']);
   });
+
+  it('resolves goTemplate-style placeholders with a leading dot', () => {
+    const result = substituteTemplate('app-{{ .path.basename }}', { 'path.basename': 'foo' });
+    expect(result.value).toBe('app-foo');
+    expect(result.unresolvedKeys).toEqual([]);
+  });
 });

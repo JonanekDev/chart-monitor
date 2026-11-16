@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
 }
 
 enum ScanState {
@@ -35,6 +35,8 @@ model Scan {
   ref            String?
   state          ScanState       @default(pending)
   errorMessage   String?
+  /// JSON array of strings: everything skipped or failed during the scan
+  warnings       String          @default("[]")
   createdAt      DateTime        @default(now())
   finishedAt     DateTime?
   chartFindings  ChartFinding[]

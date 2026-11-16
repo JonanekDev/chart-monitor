@@ -8,12 +8,11 @@ import {
 } from '@chart-monitor/shared';
 import { z } from 'zod';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
-
 export class ApiError extends Error {}
 
 async function request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  // Same origin: the backend serves this UI (`pnpm dev` proxies /api to it, see vite.config.ts)
+  const response = await fetch(path, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   });

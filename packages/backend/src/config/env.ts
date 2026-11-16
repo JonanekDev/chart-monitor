@@ -1,37 +1,39 @@
-import { readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { ConfigError } from '../errors.js';
+import { parseGitCredentials } from '../git/repoSnapshot.js';
+
+// Repo-root .env, same file docker compose reads. Resolved from this file (src/config or
+// dist/config), so it works whatever the working directory is. Variables already set in the
+// environment (e.g. by docker compose) take precedence over the file.
+const ROOT_ENV_FILE = fileURLToPath(new URL('../../../../.env', import.meta.url));
+if (existsSync(ROOT_ENV_FILE)) process.loadEnvFile(ROOT_ENV_FILE);
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
-  DATABASE_URL: z.string().url(),
-  TRIVY_SERVER_URL: z.string().url(),
-  GITHUB_APP_ID: z.string().min(1),
-  GITHUB_APP_PRIVATE_KEY_PATH: z.string().default('/run/secrets/github_app_key'),
-  GITHUB_APP_PRIVATE_KEY: z.string().optional(),
+  DATABASE_URL: z.string().default('file:./chart-monitor.db'),
+  TRIVY_SERVER_URL: z.string().url().default('http://localhost:4954'),
+  /** Optional. Only needed for private GitHub repos; sent to github.com only. */
+  GITHUB_TOKEN: z
+    .string()
+    .optional()
+    .transform((val) => val || undefined),
+  /** Optional. Tokens for private repos on any git host: `https://user:token@host`, one per line
+   * (or comma-separated). Each token is only sent to its own host. */
+  GIT_CREDENTIALS: z.string().optional().transform(parseGitCredentials),
+  INCLUDE_PRERELEASES: z
+    .string()
+    .default('false')
+    .transform((val) => val.toLowerCase() === 'true' || val === '1'),
 });
-
-function resolvePrivateKey(env: z.infer<typeof envSchema>): string {
-  try {
-    return readFileSync(env.GITHUB_APP_PRIVATE_KEY_PATH, 'utf-8');
-  } catch (cause) {
-    if (env.GITHUB_APP_PRIVATE_KEY) {
-      return env.GITHUB_APP_PRIVATE_KEY.replace(/\\n/g, '\n');
-    }
-    throw new ConfigError(
-      `Could not read private key from ${env.GITHUB_APP_PRIVATE_KEY_PATH}, and no ` +
-        'GITHUB_APP_PRIVATE_KEY fallback was set',
-      cause,
-    );
-  }
-}
 
 function loadEnv() {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     throw new ConfigError(`Invalid environment configuration: ${result.error.message}`);
   }
-  return { ...result.data, GITHUB_APP_PRIVATE_KEY: resolvePrivateKey(result.data) };
+  return result.data;
 }
 
 export const env = loadEnv();

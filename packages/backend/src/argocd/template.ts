@@ -1,4 +1,5 @@
-const PLACEHOLDER_PATTERN = /\{\{\s*([\w.-]+)\s*\}\}/g;
+// Leading dot is optional so `goTemplate: true` syntax ({{ .path.basename }}) resolves too
+const PLACEHOLDER_PATTERN = /\{\{\s*\.?([\w.-]+)\s*\}\}/g;
 
 export interface SubstitutionResult<T> {
   value: T;
@@ -6,7 +7,10 @@ export interface SubstitutionResult<T> {
 }
 
 /** Deep-substitutes `{{ key }}` placeholders in every string field using a flat param record. */
-export function substituteTemplate<T>(input: T, params: Record<string, string>): SubstitutionResult<T> {
+export function substituteTemplate<T>(
+  input: T,
+  params: Record<string, string>,
+): SubstitutionResult<T> {
   const unresolvedKeys = new Set<string>();
 
   const substitute = (node: unknown): unknown => {

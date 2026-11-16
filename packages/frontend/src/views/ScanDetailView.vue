@@ -131,14 +131,24 @@ onUnmounted(() => {
       <span :class="`badge badge-${scan.state}`">{{ scan.state }}</span>
     </div>
 
+    <details v-if="scan.warnings?.length" class="card section warnings">
+      <summary>
+        <Icon icon="lucide:alert-triangle" class="warnings-icon" />
+        {{ scan.warnings.length }} {{ scan.warnings.length === 1 ? 'item was' : 'items were' }}
+        skipped or could not be fully processed
+      </summary>
+      <ul>
+        <li v-for="warning in scan.warnings" :key="warning">{{ warning }}</li>
+      </ul>
+    </details>
+
     <p v-if="scan.errorMessage" class="error">{{ scan.errorMessage }}</p>
     <p v-else-if="isInProgress" class="text-muted">Scan is running, results will appear automatically…</p>
     <p v-else-if="chartGroups.length === 0" class="text-muted">
-      The scan finished but found no Helm chart through the supported ApplicationSet generators
-      (<code>list</code>, <code>git</code> with <code>directories</code> or <code>files</code>).
-      If the repo does use charts, check whether the applications reference charts directly (not
-      via a cluster/SCM-provider/PR generator, or a local git path without a <code>chart:</code>
-      field).
+      The scan finished but found no Helm chart. Applications with only git paths (plain manifests,
+      kustomize) have no chart to check;{{ ' ' }}
+      <template v-if="scan.warnings?.length">the skipped items above explain what else was left out.</template>
+      <template v-else>nothing was skipped.</template>
     </p>
 
     <section v-else class="card section">
@@ -275,6 +285,27 @@ onUnmounted(() => {
 }
 .error {
   color: #ef4444;
+}
+
+.warnings summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.warnings-icon {
+  color: #eab308;
+  flex-shrink: 0;
+}
+.warnings ul {
+  margin: var(--space-4) 0 0;
+  padding-left: var(--space-6);
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+.warnings li + li {
+  margin-top: var(--space-2);
 }
 
 .chart-row {

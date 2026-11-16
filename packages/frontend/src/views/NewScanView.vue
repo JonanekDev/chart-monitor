@@ -47,10 +47,13 @@ async function onSubmit() {
       <input
         id="repoUrl"
         v-model="repoUrl"
-        type="url"
-        placeholder="https://github.com/rizek/gitops-repo"
+        type="text"
+        placeholder="https://github.com/rizek/gitops-repo or git@github.com:rizek/gitops-repo.git"
         required
       />
+      <p class="text-muted hint">
+        Any public git repo works. Private GitHub repos need <code>GITHUB_TOKEN</code> on the backend.
+      </p>
     </div>
 
     <div class="field">
@@ -75,6 +78,10 @@ async function onSubmit() {
 <style scoped>
 .field {
   margin-bottom: var(--space-4);
+}
+.hint {
+  margin-top: var(--space-2);
+  font-size: 0.875rem;
 }
 .error {
   color: #ef4444;

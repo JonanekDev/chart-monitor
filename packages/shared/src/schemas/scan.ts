@@ -2,7 +2,13 @@ import { z } from 'zod';
 import { cveSeveritySchema, scanStateSchema, versionStatusSchema } from './common.js';
 
 export const createScanRequestSchema = z.object({
-  repoUrl: z.string().url(),
+  repoUrl: z
+    .string()
+    .trim()
+    .regex(
+      /^(https?:\/\/|ssh:\/\/|[\w.-]+@[\w.-]+:)\S+$/,
+      'Enter a git URL: https://host/org/repo or git@host:org/repo.git',
+    ),
   searchPath: z.string().optional(),
   ref: z.string().optional(),
 });
@@ -58,6 +64,8 @@ export const scanSummarySchema = z.object({
 export type ScanSummary = z.infer<typeof scanSummarySchema>;
 
 export const scanDetailSchema = scanSummarySchema.extend({
+  /** What the scan skipped or could not process (unsupported generators, missing value files…) */
+  warnings: z.array(z.string()),
   chartFindings: z.array(chartFindingSchema),
   imageFindings: z.array(imageFindingSchema),
   cveFindings: z.array(cveFindingSchema),

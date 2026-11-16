@@ -9,7 +9,7 @@ export class AppError extends Error {
 }
 
 export class ConfigError extends AppError {}
-export class GithubAccessError extends AppError {}
+export class RepoAccessError extends AppError {}
 export class ArgoCdParseError extends AppError {}
 export class HelmResolutionError extends AppError {}
 export class TrivyScanError extends AppError {}

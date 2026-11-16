@@ -23,6 +23,18 @@ describe('findLatestVersion', () => {
       ]),
     ).toBe('v1.2.3');
   });
+
+  it('filters out pre-releases by default', () => {
+    expect(findLatestVersion(['1.19.5', '1.20.4', '1.21.0-pre.4'])).toBe('1.20.4');
+  });
+
+  it('includes pre-releases when requested', () => {
+    expect(findLatestVersion(['1.19.5', '1.20.4', '1.21.0-pre.4'], true)).toBe('1.21.0-pre.4');
+  });
+
+  it('falls back to pre-release if no stable versions exist', () => {
+    expect(findLatestVersion(['0.1.0-alpha', '0.1.0-beta.2'])).toBe('0.1.0-beta.2');
+  });
 });
 
 describe('compareVersions', () => {
