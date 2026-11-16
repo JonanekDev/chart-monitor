@@ -37,6 +37,11 @@ model Scan {
   errorMessage   String?
   /// JSON array of strings: everything skipped or failed during the scan
   warnings       String          @default("[]")
+  /// Current step (ScanPhase); null once succeeded
+  phase          String?
+  progressDone   Int             @default(0)
+  progressTotal  Int             @default(0)
+  progressDetail String?
   createdAt      DateTime        @default(now())
   finishedAt     DateTime?
   chartFindings  ChartFinding[]
@@ -70,6 +75,7 @@ model ImageFinding {
   latestTag        String?
   status           VersionStatus
   note             String?
+  vulnerabilitiesScanned Boolean @default(false)
 
   @@index([scanId])
 }

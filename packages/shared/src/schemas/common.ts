@@ -30,6 +30,25 @@ export const scanStateSchema = z.enum([
 
 export type ScanStateValue = z.infer<typeof scanStateSchema>;
 
+/** Scan steps in execution order; the UI lists them as a checklist */
+export const ScanPhase = {
+  CLONING: 'cloning',
+  RESOLVING: 'resolving',
+  CHART_VERSIONS: 'chart_versions',
+  IMAGES: 'images',
+  VULNERABILITIES: 'vulnerabilities',
+} as const;
+
+export const scanPhaseSchema = z.enum([
+  ScanPhase.CLONING,
+  ScanPhase.RESOLVING,
+  ScanPhase.CHART_VERSIONS,
+  ScanPhase.IMAGES,
+  ScanPhase.VULNERABILITIES,
+]);
+
+export type ScanPhaseValue = z.infer<typeof scanPhaseSchema>;
+
 export const CveSeverity = {
   UNKNOWN: 'UNKNOWN',
   LOW: 'LOW',

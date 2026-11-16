@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { cveSeveritySchema, scanStateSchema, versionStatusSchema } from './common.js';
+import {
+  cveSeveritySchema,
+  scanPhaseSchema,
+  scanStateSchema,
+  versionStatusSchema,
+} from './common.js';
 
 export const createScanRequestSchema = z.object({
   repoUrl: z
@@ -35,6 +40,8 @@ export const imageFindingSchema = z.object({
   latestTag: z.string().nullable(),
   status: versionStatusSchema,
   note: z.string().nullable(),
+  /** False while the vulnerability scan of this image is still pending */
+  vulnerabilitiesScanned: z.boolean(),
 });
 
 export type ImageFinding = z.infer<typeof imageFindingSchema>;
@@ -59,6 +66,17 @@ export const scanSummarySchema = z.object({
   createdAt: z.string().datetime(),
   finishedAt: z.string().datetime().nullable(),
   errorMessage: z.string().nullable(),
+  /** Current (or, for a failed scan, last) step; null once the scan succeeded */
+  progress: z
+    .object({
+      phase: scanPhaseSchema,
+      done: z.number().int(),
+      /** 0 when the step has no countable items */
+      total: z.number().int(),
+      /** Most recently finished item, e.g. a chart or image name */
+      detail: z.string().nullable(),
+    })
+    .nullable(),
 });
 
 export type ScanSummary = z.infer<typeof scanSummarySchema>;

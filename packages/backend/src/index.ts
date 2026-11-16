@@ -4,12 +4,17 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { env } from './config/env.js';
 import { scanRoutes } from './routes/scans.js';
+import { prisma } from './db/client.js';
+import { failInterruptedScans } from './scan/scanService.js';
 
 // Built frontend, resolved from src/ or dist/ alike. Missing during `pnpm dev`, where Vite serves
 // the UI itself and proxies /api here.
 const FRONTEND_DIST = fileURLToPath(new URL('../../frontend/dist', import.meta.url));
 
 const app = Fastify({ logger: true });
+
+const interrupted = await failInterruptedScans(prisma);
+if (interrupted > 0) app.log.warn(`Marked ${interrupted} interrupted scan(s) as failed`);
 
 await app.register(scanRoutes);
 
@@ -32,6 +37,15 @@ if (existsSync(FRONTEND_DIST)) {
       return reply.sendFile('index.html');
     }
     return reply.status(404).send({ error: 'Not found' });
+  });
+}
+
+// As PID 1 in a container, node ignores SIGTERM unless it handles it, so `docker stop` would wait
+// 10s and then SIGKILL. Running scans die either way; failInterruptedScans marks them on next start.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(signal, () => {
+    app.log.info(`${signal} received, shutting down`);
+    void app.close().finally(() => process.exit(0));
   });
 }
 

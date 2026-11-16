@@ -37,4 +37,4 @@ RUN pnpm --filter @chart-monitor/backend run build
 
 EXPOSE 3000
 ENTRYPOINT ["sh", "/app/packages/backend/docker-entrypoint.sh"]
-CMD ["sh", "-c", "pnpm --filter @chart-monitor/backend run db:deploy && node packages/backend/dist/index.js"]
+CMD ["sh", "-c", "pnpm --filter @chart-monitor/backend run db:deploy && exec node packages/backend/dist/index.js"]

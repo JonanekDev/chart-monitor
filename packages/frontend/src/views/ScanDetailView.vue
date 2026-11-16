@@ -7,6 +7,7 @@ import type {
   CveSeverityValue,
   ImageFinding,
   ScanDetail,
+  ScanPhaseValue,
 } from '@chart-monitor/shared';
 import { getScan } from '../api/client.js';
 
@@ -19,6 +20,39 @@ let pollHandle: ReturnType<typeof setInterval> | undefined;
 const isInProgress = computed(
   () => scan.value?.state === 'pending' || scan.value?.state === 'running',
 );
+
+// Same order as the backend runs them
+const STEPS: { phase: ScanPhaseValue; label: string }[] = [
+  { phase: 'cloning', label: 'Cloning repository' },
+  { phase: 'resolving', label: 'Finding ArgoCD applications' },
+  { phase: 'chart_versions', label: 'Checking chart versions' },
+  { phase: 'images', label: 'Finding images in charts' },
+  { phase: 'vulnerabilities', label: 'Scanning images for vulnerabilities' },
+];
+type StepStatus = 'done' | 'active' | 'failed' | 'todo';
+const STEP_ICON: Record<StepStatus, string> = {
+  done: 'lucide:circle-check',
+  active: 'lucide:loader-circle',
+  failed: 'lucide:circle-x',
+  todo: 'lucide:circle-dashed',
+};
+
+const currentStep = computed(() =>
+  STEPS.findIndex((step) => step.phase === scan.value?.progress?.phase),
+);
+
+// Images are only known once the "images" step is over
+const imagesPending = computed(
+  () =>
+    isInProgress.value &&
+    currentStep.value <= STEPS.findIndex((step) => step.phase === 'images'),
+);
+
+function stepStatus(index: number): StepStatus {
+  if (index < currentStep.value) return 'done';
+  if (index > currentStep.value) return 'todo';
+  return scan.value?.state === 'failed' ? 'failed' : 'active';
+}
 
 // Worst-to-best. Only MEDIUM+ get a chart-header icon — LOW/UNKNOWN aren't worth flagging at a glance.
 const SEVERITY_ORDER: CveSeverityValue[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
@@ -142,16 +176,35 @@ onUnmounted(() => {
       </ul>
     </details>
 
-    <p v-if="scan.errorMessage" class="error">{{ scan.errorMessage }}</p>
-    <p v-else-if="isInProgress" class="text-muted">Scan is running, results will appear automatically…</p>
-    <p v-else-if="chartGroups.length === 0" class="text-muted">
+    <section v-if="isInProgress || scan.progress" class="card section">
+      <p v-if="!scan.progress" class="text-muted">Waiting to start…</p>
+      <ol v-else class="steps">
+        <li v-for="(step, i) in STEPS" :key="step.phase" :class="['step', stepStatus(i)]">
+          <Icon :icon="STEP_ICON[stepStatus(i)]" class="step-icon" />
+          <span>{{ step.label }}</span>
+          <span v-if="i === currentStep && scan.progress.total" class="text-muted mono">
+            {{ scan.progress.done }} / {{ scan.progress.total }}
+          </span>
+        </li>
+      </ol>
+      <template v-if="isInProgress && scan.progress?.total">
+        <progress :value="scan.progress.done" :max="scan.progress.total" />
+        <p v-if="scan.progress.detail" class="text-muted step-detail mono">
+          Last finished: {{ scan.progress.detail }}
+        </p>
+      </template>
+    </section>
+
+    <p v-if="scan.errorMessage" class="error section">{{ scan.errorMessage }}</p>
+
+    <p v-if="!isInProgress && scan.state !== 'failed' && chartGroups.length === 0" class="text-muted">
       The scan finished but found no Helm chart. Applications with only git paths (plain manifests,
       kustomize) have no chart to check;{{ ' ' }}
       <template v-if="scan.warnings?.length">the skipped items above explain what else was left out.</template>
       <template v-else>nothing was skipped.</template>
     </p>
 
-    <section v-else class="card section">
+    <section v-if="chartGroups.length > 0" class="card section">
       <h2 class="mono">Chart versions</h2>
       <table>
         <thead>
@@ -186,7 +239,9 @@ onUnmounted(() => {
             </tr>
             <tr v-if="expandedKeys.has(group.key)" class="expanded-row">
               <td colspan="6">
-                <p v-if="group.images.length === 0" class="text-muted">No images found for this chart.</p>
+                <p v-if="group.images.length === 0" class="text-muted">
+                  {{ imagesPending ? 'Finding images…' : 'No images found for this chart.' }}
+                </p>
                 <div v-else class="table-scroll">
                 <table class="nested-table">
                   <thead>
@@ -224,7 +279,10 @@ onUnmounted(() => {
                           >
                             {{ image.cveCounts[severity] }}
                           </span>
-                          <span v-if="image.cves.length === 0" class="text-muted">—</span>
+                          <span v-if="!image.vulnerabilitiesScanned" class="text-muted">
+                            {{ isInProgress ? 'scanning…' : 'not scanned' }}
+                          </span>
+                          <span v-else-if="image.cves.length === 0" class="text-muted">none</span>
                         </td>
                       </tr>
                       <tr v-if="expandedImageKeys.has(`${group.key}-${image.image}`)" class="expanded-row">
@@ -285,6 +343,54 @@ onUnmounted(() => {
 }
 .error {
   color: #ef4444;
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.step.todo {
+  color: var(--color-text-muted);
+}
+.step-icon {
+  flex-shrink: 0;
+}
+.step.done .step-icon {
+  color: var(--color-primary);
+}
+.step.failed .step-icon {
+  color: #ef4444;
+}
+.step.active .step-icon {
+  animation: spin 1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .step.active .step-icon {
+    animation: none;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+progress {
+  width: 100%;
+  margin-top: var(--space-4);
+  accent-color: var(--color-primary);
+}
+.step-detail {
+  margin-top: var(--space-2);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
 }
 
 .warnings summary {
