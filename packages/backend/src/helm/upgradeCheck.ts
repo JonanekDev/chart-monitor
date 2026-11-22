@@ -36,25 +36,36 @@ function existingDepth(node: unknown, path: string[]): number {
  * Keys the app sets that existed in the old chart's defaults but are gone from the new ones.
  * Helm ignores unknown keys without a word, so a renamed key silently drops the setting.
  * Keys the old defaults didn't have either (free-form maps, commented-out examples) can't be judged
- * and are skipped.
- * ponytail: only the parent chart's values.yaml; keys moved into a subchart's defaults show up as
- * removed
+ * and are skipped. The defaults include the subcharts' (see pullChart).
  */
 export function removedValueKeys(
   valuesDocuments: string[],
+  parameterNames: string[],
   oldDefaults: unknown,
   newDefaults: unknown,
 ): string[] {
+  const paths = [
+    ...valuesDocuments.flatMap((document) => leafPaths(parse(document) as unknown, [], [])),
+    ...parameterNames.map(parameterPath),
+  ];
   const removed = new Set<string>();
-  for (const document of valuesDocuments) {
-    for (const path of leafPaths(parse(document) as unknown, [], [])) {
-      const known = path.slice(0, existingDepth(oldDefaults, path));
-      if (known.length > 0 && existingDepth(newDefaults, known) < known.length) {
-        removed.add(known.join('.'));
-      }
+  for (const path of paths) {
+    const known = path.slice(0, existingDepth(oldDefaults, path));
+    if (known.length > 0 && existingDepth(newDefaults, known) < known.length) {
+      // --set notation, so a key with a dot in it (annotations) reads unambiguously
+      removed.add(known.map((key) => key.replaceAll('.', '\\.')).join('.'));
     }
   }
   return [...removed].sort();
+}
+
+/** A `helm.parameters` name (`--set` syntax) as a values path: `a\.b.c[0].d` → a.b, c, d. List
+ * indexes are dropped, lists count as a whole */
+export function parameterPath(name: string): string[] {
+  return name
+    .split(/(?<!\\)\./)
+    .map((key) => key.replace(/\\\./g, '.').replace(/\[\d+\]/g, ''))
+    .filter(Boolean);
 }
 
 function resourceName(manifest: Obj): string {

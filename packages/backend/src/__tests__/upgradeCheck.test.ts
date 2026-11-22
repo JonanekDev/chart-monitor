@@ -1,7 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { diffManifests, diffVulnerabilities, removedValueKeys } from '../helm/upgradeCheck.js';
+import {
+  diffManifests,
+  diffVulnerabilities,
+  parameterPath,
+  removedValueKeys,
+} from '../helm/upgradeCheck.js';
 
 describe('removedValueKeys', () => {
+  it('checks helm.parameters too', () => {
+    const oldDefaults = { image: { tag: '' }, 'a.b': { c: 1 } };
+    expect(
+      removedValueKeys([], ['image.tag', 'a\\.b.c', 'extra.x'], oldDefaults, { image: {} }),
+    ).toEqual(['a\\.b.c', 'image.tag']);
+  });
+
+  it('parses --set names: escaped dots, list indexes', () => {
+    expect(parameterPath('ingress.hosts[0].host')).toEqual(['ingress', 'hosts', 'host']);
+    expect(parameterPath('podAnnotations.prometheus\\.io/scrape')).toEqual([
+      'podAnnotations',
+      'prometheus.io/scrape',
+    ]);
+  });
+
   it('reports keys the old defaults had and the new ones lack', () => {
     const oldDefaults = { ingress: { hosts: [], enabled: false }, podAnnotations: {} };
     const newDefaults = { ingress: { rules: [], enabled: false }, podAnnotations: {} };
@@ -12,13 +32,13 @@ ingress:
 podAnnotations: { team: core }
 notInDefaults: { anything: 1 }
 `;
-    expect(removedValueKeys([values], oldDefaults, newDefaults)).toEqual(['ingress.hosts']);
+    expect(removedValueKeys([values], [], oldDefaults, newDefaults)).toEqual(['ingress.hosts']);
   });
 
   it('reports the removed parent once when a whole section is gone', () => {
     const values = 'metrics: { serviceMonitor: { enabled: true, interval: 30s } }';
     const oldDefaults = { metrics: { serviceMonitor: { enabled: false, interval: '' } } };
-    expect(removedValueKeys([values], oldDefaults, {})).toEqual([
+    expect(removedValueKeys([values], [], oldDefaults, {})).toEqual([
       'metrics.serviceMonitor.enabled',
       'metrics.serviceMonitor.interval',
     ]);

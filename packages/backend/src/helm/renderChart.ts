@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -174,22 +174,96 @@ export async function renderChart(
   }
 }
 
-/** The chart's default values.yaml (without its subcharts' defaults) */
-export async function showChartValues(
+/** What `Chart.yaml` says about a chart version (the fields used here) */
+export interface ChartMetadata {
+  name?: string;
+  home?: string;
+  sources?: string[];
+  annotations?: Record<string, string>;
+  dependencies?: { name: string; alias?: string }[];
+}
+
+export interface PulledChart {
+  /** values.yaml with each subchart's defaults under its alias or name, as Helm merges them */
+  defaults: Record<string, unknown>;
+  metadata: ChartMetadata;
+}
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** `override` wins; maps merge key by key, anything else replaces */
+function mergeValues(base: unknown, override: unknown): unknown {
+  if (!isObject(base) || !isObject(override)) return override === undefined ? base : override;
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(override)) merged[key] = mergeValues(base[key], value);
+  return merged;
+}
+
+/** A regular file's content; null for a missing file or a symlink (charts are untrusted) */
+async function readChartFile(file: string): Promise<string | null> {
+  const info = await lstat(file).catch(() => null);
+  return info?.isFile() ? readFile(file, 'utf-8') : null;
+}
+
+/** Packaged subcharts are tarballs inside the chart; refuses entries that would land outside */
+async function untar(archive: string, into: string): Promise<string> {
+  const { stdout } = await execFileAsync('tar', ['-tzf', archive]);
+  if (
+    stdout.split('\n').some((entry) => entry.startsWith('/') || entry.split('/').includes('..'))
+  ) {
+    throw new Error(`${path.basename(archive)} has paths outside the chart`);
+  }
+  const dir = await mkdtemp(path.join(into, 'subchart-'));
+  await execFileAsync('tar', ['-xzf', archive, '-C', dir]);
+  const [chartDir] = await readdir(dir);
+  return path.join(dir, chartDir ?? '');
+}
+
+async function chartDefaults(dir: string): Promise<PulledChart> {
+  const metadata = (parse((await readChartFile(path.join(dir, 'Chart.yaml'))) ?? '') ??
+    {}) as ChartMetadata;
+  const parsed = parse((await readChartFile(path.join(dir, 'values.yaml'))) ?? '') as unknown;
+  const defaults = isObject(parsed) ? parsed : {};
+
+  const subchartsDir = path.join(dir, 'charts');
+  for (const entry of await readdir(subchartsDir, { withFileTypes: true }).catch(() => [])) {
+    const entryPath = path.join(subchartsDir, entry.name);
+    const subDir = entry.name.endsWith('.tgz')
+      ? await untar(entryPath, dir)
+      : entry.isDirectory()
+        ? entryPath
+        : null;
+    if (!subDir) continue;
+    const sub = await chartDefaults(subDir);
+    // The same chart can be a dependency twice, under different aliases
+    const deps = (metadata.dependencies ?? []).filter((d) => d.name === sub.metadata.name);
+    const keys = deps.length
+      ? deps.map((d) => d.alias ?? d.name)
+      : [sub.metadata.name ?? entry.name];
+    for (const key of keys) defaults[key] = mergeValues(sub.defaults, defaults[key]);
+  }
+  return { defaults, metadata };
+}
+
+/** Downloads the chart at `source.targetRevision` (`helm pull --untar`): its default values,
+ * including the subcharts' (which `helm show values` leaves out), and its Chart.yaml */
+export async function pullChart(
   helm: HelmSession,
   source: ApplicationSource,
-): Promise<unknown> {
+): Promise<PulledChart> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'chart-monitor-pull-'));
   try {
-    const args = ['show', 'values', ...(await helm.chartArgs(source))];
-    const { stdout } = await execFileAsync('helm', args, {
-      env: HELM_ENV,
-      maxBuffer: 1024 * 1024 * 20,
-    });
-    return parse(stdout) as unknown;
+    const args = ['pull', ...(await helm.chartArgs(source)), '--untar', '--untardir', dir];
+    await execFileAsync('helm', args, { env: HELM_ENV, maxBuffer: 1024 * 1024 * 20 });
+    const [chartDir] = await readdir(dir);
+    return await chartDefaults(path.join(dir, chartDir ?? ''));
   } catch (cause) {
     throw new HelmResolutionError(
-      `helm show values failed for chart "${source.chart}" @ ${source.targetRevision}`,
+      `helm pull failed for chart "${source.chart}" @ ${source.targetRevision}`,
       cause,
     );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }

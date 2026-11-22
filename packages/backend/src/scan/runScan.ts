@@ -13,7 +13,7 @@ import { resolveApplicationSets } from '../argocd/findApplicationSets.js';
 import { withWarningPrefix, type ApplicationSource, type ScanContext } from '../argocd/types.js';
 import { fetchChartVersions, normalizeChartRepoUrl } from '../helm/chartVersions.js';
 import { compareVersions, findLatestVersion, isSureUpgrade } from '../helm/versionCompare.js';
-import { findImages, HelmSession, renderChart, showChartValues } from '../helm/renderChart.js';
+import { findImages, HelmSession, pullChart, renderChart } from '../helm/renderChart.js';
 import { diffManifests, diffVulnerabilities, removedValueKeys } from '../helm/upgradeCheck.js';
 import { collectValuesDocuments } from '../argocd/valueFiles.js';
 import { expandUmbrellaChart, type ChartToScan } from '../argocd/umbrellaChart.js';
@@ -172,11 +172,16 @@ async function checkUpgrade(
   latestVersion: string,
 ): Promise<{ upgrade: ChartUpgrade; latestImages: string[] | null }> {
   const latest = { ...job.source, targetRevision: latestVersion };
-  const [oldDefaults, newDefaults] = await Promise.all([
-    showChartValues(job.helm, job.source),
-    showChartValues(job.helm, latest),
+  const [current, upgraded] = await Promise.all([
+    pullChart(job.helm, job.source),
+    pullChart(job.helm, latest),
   ]);
-  const removedValues = removedValueKeys(job.valuesDocuments, oldDefaults, newDefaults);
+  const removedValues = removedValueKeys(
+    job.valuesDocuments,
+    (job.source.helm?.parameters ?? []).map((p) => p.name),
+    current.defaults,
+    upgraded.defaults,
+  );
   try {
     const latestManifests = await renderChart(job.helm, latest, job.valuesDocuments);
     return {

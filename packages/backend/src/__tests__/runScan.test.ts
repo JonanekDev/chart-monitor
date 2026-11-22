@@ -35,7 +35,7 @@ vi.mock('../helm/renderChart.js', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   renderChart: async (_helm: unknown, { targetRevision }: { targetRevision: string }) =>
     targetRevision === '1.0.0' ? [deployment('7.0', 'redis')] : [deployment('7.2', 'cache')],
-  showChartValues: async () => ({}),
+  pullChart: async () => ({ defaults: {}, metadata: {} }),
 }));
 vi.mock('../registry/imageRef.js', async (importOriginal) => ({
   ...(await importOriginal<object>()),
