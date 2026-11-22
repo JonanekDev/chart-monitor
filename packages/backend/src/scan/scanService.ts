@@ -2,6 +2,7 @@ import {
   CveSeverity,
   ScanState,
   VersionStatus,
+  type ChartUpgrade,
   type ScanCounts,
   type ScanDetail,
   type ScanPhaseValue,
@@ -86,6 +87,7 @@ function toScanDetail(scan: ScanWithFindings): ScanDetail {
       latestVersion: f.latestVersion,
       status: f.status,
       note: f.note,
+      upgrade: f.upgrade ? (JSON.parse(f.upgrade) as ChartUpgrade) : null,
     })),
     imageFindings: scan.imageFindings.map((f) => ({
       applicationName: f.applicationName,
@@ -125,6 +127,11 @@ function databaseReporter(prisma: PrismaClient, scanId: string): ScanReporter {
       updateScan({ phase, progressDone: 0, progressTotal: total, progressDetail: null }),
     step: (detail) => updateScan({ progressDone: { increment: 1 }, progressDetail: detail }),
     chartFinding: (finding) => prisma.chartFinding.create({ data: { ...finding, scanId } }),
+    chartUpgrade: (chart, upgrade) =>
+      prisma.chartFinding.updateMany({
+        where: { scanId, ...chart },
+        data: { upgrade: JSON.stringify(upgrade) },
+      }),
     imageFindings: (findings) =>
       prisma.imageFinding.createMany({ data: findings.map((f) => ({ ...f, scanId })) }),
     imageScanned: ({ repository, tag }, cves) =>

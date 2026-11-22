@@ -1,4 +1,9 @@
-import { ScanState, type ChartUpdateMode, type CveSeverityValue } from '@chart-monitor/shared';
+import {
+  ScanState,
+  type ChartUpdateMode,
+  type ChartUpgrade,
+  type CveSeverityValue,
+} from '@chart-monitor/shared';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { buildNotification, type NotifyRules, type ScanSnapshot } from './buildNotification.js';
 import { sendNotification } from './send.js';
@@ -8,13 +13,16 @@ const withFindings = { chartFindings: true, cveFindings: true } as const;
 function snapshot(scan: {
   state: string;
   errorMessage: string | null;
-  chartFindings: ScanSnapshot['charts'];
+  chartFindings: (Omit<ScanSnapshot['charts'][number], 'upgrade'> & { upgrade: string | null })[];
   cveFindings: (Omit<ScanSnapshot['cves'][number], 'severity'> & { severity: string })[];
 }): ScanSnapshot {
   return {
     state: scan.state,
     errorMessage: scan.errorMessage,
-    charts: scan.chartFindings,
+    charts: scan.chartFindings.map((c) => ({
+      ...c,
+      upgrade: c.upgrade ? (JSON.parse(c.upgrade) as ChartUpgrade) : null,
+    })),
     cves: scan.cveFindings.map((c) => ({ ...c, severity: c.severity as CveSeverityValue })),
   };
 }

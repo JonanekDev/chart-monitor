@@ -2,20 +2,23 @@ import {
   ScanPhase,
   VersionStatus,
   type ChartFinding,
+  type ChartUpgrade,
   type CveFinding,
   type ImageFinding,
   type ScanPhaseValue,
+  type VulnerabilityChange,
 } from '@chart-monitor/shared';
 import { resolveApplicationSets } from '../argocd/findApplicationSets.js';
 import { withWarningPrefix, type ApplicationSource, type ScanContext } from '../argocd/types.js';
 import { fetchChartVersions, normalizeChartRepoUrl } from '../helm/chartVersions.js';
 import { compareVersions, findLatestVersion } from '../helm/versionCompare.js';
-import { renderChartImages } from '../helm/renderChart.js';
+import { findImages, renderChart, showChartValues } from '../helm/renderChart.js';
+import { diffManifests, diffVulnerabilities, removedValueKeys } from '../helm/upgradeCheck.js';
 import { collectValuesDocuments } from '../argocd/valueFiles.js';
 import { expandUmbrellaChart, type ChartToScan } from '../argocd/umbrellaChart.js';
 import { createRepoOpener } from '../git/repoSnapshot.js';
 import { fetchImageTags } from '../registry/imageRef.js';
-import { scanImageForVulnerabilities } from '../trivy/scanImage.js';
+import { scanImageForVulnerabilities, type ImageVulnerability } from '../trivy/scanImage.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
 import { env } from '../config/env.js';
 
@@ -88,6 +91,60 @@ function splitImageTag(image: string): [string, string?] {
   return [withoutDigest];
 }
 
+/** Everything but the vulnerabilities, which need the latest version's images scanned first */
+async function checkUpgrade(
+  job: ChartJob,
+  manifests: unknown[],
+  latestVersion: string,
+): Promise<{ upgrade: ChartUpgrade; latestImages: string[] | null }> {
+  const latest = { ...job.source, targetRevision: latestVersion };
+  const [oldDefaults, newDefaults] = await Promise.all([
+    showChartValues(job.source),
+    showChartValues(latest),
+  ]);
+  const removedValues = removedValueKeys(job.valuesDocuments, oldDefaults, newDefaults);
+  try {
+    const latestManifests = await renderChart(latest, job.valuesDocuments);
+    return {
+      upgrade: {
+        removedValues,
+        manifestChanges: diffManifests(manifests, latestManifests),
+        renderError: null,
+        vulnerabilities: null,
+      },
+      latestImages: findImages(latestManifests),
+    };
+  } catch (error) {
+    return {
+      upgrade: {
+        removedValues,
+        manifestChanges: [],
+        renderError: describeError(error),
+        vulnerabilities: null,
+      },
+      latestImages: null,
+    };
+  }
+}
+
+/** The app's CVEs, or null if any of its images couldn't be scanned */
+function vulnerabilitiesOf(
+  images: string[],
+  scanned: Map<string, ImageVulnerability[] | null>,
+): VulnerabilityChange[] | null {
+  const perImage = images.map((image) => ({ image, found: scanned.get(image) }));
+  if (perImage.some(({ found }) => !found)) return null;
+  return perImage.flatMap(({ image, found }) =>
+    found!.map(({ vulnerabilityId, pkgName, severity, title }) => ({
+      vulnerabilityId,
+      pkgName,
+      severity,
+      title,
+      image: splitImageTag(image)[0],
+    })),
+  );
+}
+
 /** Every chart an application deploys: `chart:` sources directly, plus the remote dependencies of
  * umbrella charts referenced by git `path:` sources. */
 async function collectChartsToScan(
@@ -119,6 +176,10 @@ export interface ScanReporter {
   /** One item of the current step finished */
   step(detail: string): Promise<unknown>;
   chartFinding(finding: ChartFinding): Promise<unknown>;
+  chartUpgrade(
+    chart: { applicationName: string; chartName: string },
+    upgrade: ChartUpgrade,
+  ): Promise<unknown>;
   imageFindings(findings: ImageFinding[]): Promise<unknown>;
   /** The vulnerability scan of one image finished (`cves` may be empty) */
   imageScanned(image: { repository: string; tag: string }, cves: CveFinding[]): Promise<unknown>;
@@ -181,42 +242,94 @@ export async function executeScan(
 
     // Cheap step first, so chart versions are visible long before the slow image scans finish
     await reporter.phase(ScanPhase.CHART_VERSIONS, jobs.length);
-    await mapWithConcurrency(jobs, CHART_CONCURRENCY, async (job) => {
-      await reporter.chartFinding(
-        await resolveChartFinding(job.applicationName, job.applicationSetName, job.source),
+    const chartFindings = await mapWithConcurrency(jobs, CHART_CONCURRENCY, async (job) => {
+      const finding = await resolveChartFinding(
+        job.applicationName,
+        job.applicationSetName,
+        job.source,
       );
+      await reporter.chartFinding(finding);
       await reporter.step(`${job.applicationName} (${job.source.chart})`);
+      return finding;
     });
 
     await reporter.phase(ScanPhase.IMAGES, jobs.length);
     const appImages = await mapWithConcurrency(jobs, CHART_CONCURRENCY, async (job) => {
-      const images = await renderChartImages(job.source, job.valuesDocuments).catch((error) => {
+      const manifests = await renderChart(job.source, job.valuesDocuments).catch((error) => {
         job.ctx.warn(`images could not be determined: ${describeError(error)}`);
-        return [] as string[];
+        return null;
       });
+      const images = findImages(manifests ?? []);
       await reporter.imageFindings(await resolveImageFindings(job.applicationName, images));
       await reporter.step(`${job.applicationName} (${job.source.chart})`);
-      return { applicationName: job.applicationName, images };
+      return { applicationName: job.applicationName, images, manifests };
     });
     await flushWarnings();
 
-    // Each distinct image is scanned once, even when several applications use it
-    const uniqueImages = [...new Set(appImages.flatMap((a) => a.images))];
+    const upgrades = jobs.flatMap((job, i) => {
+      const { status, latestVersion } = chartFindings[i] as ChartFinding;
+      const { manifests, images } = appImages[i]!;
+      return status === VersionStatus.OUTDATED && latestVersion && manifests
+        ? [{ job, manifests, images, latestVersion }]
+        : [];
+    });
+    await reporter.phase(ScanPhase.UPGRADES, upgrades.length);
+    const checked = await mapWithConcurrency(
+      upgrades,
+      CHART_CONCURRENCY,
+      async ({ job, manifests, images, latestVersion }) => {
+        const chart = { applicationName: job.applicationName, chartName: job.source.chart };
+        const result = await checkUpgrade(job, manifests, latestVersion).catch((error) => {
+          job.ctx.warn(`upgrade to ${latestVersion} could not be checked: ${describeError(error)}`);
+          return null;
+        });
+        if (result) await reporter.chartUpgrade(chart, result.upgrade);
+        await reporter.step(`${job.applicationName} (${job.source.chart} ${latestVersion})`);
+        return result && { ...result, chart, images };
+      },
+    );
+    await flushWarnings();
+
+    // Each distinct image is scanned once, even when several applications (or a current and an
+    // upgraded chart) use it
+    const currentImages = new Set(appImages.flatMap((a) => a.images));
+    const uniqueImages = [
+      ...new Set([...currentImages, ...checked.flatMap((c) => c?.latestImages ?? [])]),
+    ];
+    const scanned = new Map<string, ImageVulnerability[] | null>();
     await reporter.phase(ScanPhase.VULNERABILITIES, uniqueImages.length);
     await mapWithConcurrency(uniqueImages, CVE_SCAN_CONCURRENCY, async (image) => {
       const vulnerabilities = await scanImageForVulnerabilities(image).catch((error) => {
         ctx.warn(`vulnerability scan of ${image} failed: ${describeError(error)}`);
-        return [];
+        return null;
       });
-      const [repository, tag = 'latest'] = splitImageTag(image);
-      const cves = appImages
-        .filter((a) => a.images.includes(image))
-        .flatMap(({ applicationName }) =>
-          vulnerabilities.map((v): CveFinding => ({ applicationName, image: repository, ...v })),
-        );
-      await reporter.imageScanned({ repository, tag }, cves);
+      scanned.set(image, vulnerabilities);
+      if (currentImages.has(image)) {
+        const [repository, tag = 'latest'] = splitImageTag(image);
+        const cves = appImages
+          .filter((a) => a.images.includes(image))
+          .flatMap(({ applicationName }) =>
+            (vulnerabilities ?? []).map((v): CveFinding => ({
+              applicationName,
+              image: repository,
+              ...v,
+            })),
+          );
+        await reporter.imageScanned({ repository, tag }, cves);
+      }
       await reporter.step(image);
     });
+
+    for (const result of checked) {
+      if (!result?.latestImages) continue;
+      const current = vulnerabilitiesOf(result.images, scanned);
+      const latest = vulnerabilitiesOf(result.latestImages, scanned);
+      if (!current || !latest) continue;
+      await reporter.chartUpgrade(result.chart, {
+        ...result.upgrade,
+        vulnerabilities: diffVulnerabilities(current, latest),
+      });
+    }
   } finally {
     // Also on failure: partial results stay, so should the warnings that explain gaps in them
     await flushWarnings();

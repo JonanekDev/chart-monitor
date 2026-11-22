@@ -1,4 +1,4 @@
-import type { ChartUpdateMode, CveSeverityValue } from '@chart-monitor/shared';
+import type { ChartUpdateMode, ChartUpgrade, CveSeverityValue } from '@chart-monitor/shared';
 
 export interface NotifyRules {
   minSeverity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | null;
@@ -17,6 +17,7 @@ export interface ScanSnapshot {
     currentVersion: string;
     latestVersion: string | null;
     status: string;
+    upgrade?: ChartUpgrade | null;
   }[];
   cves: {
     applicationName: string;
@@ -47,7 +48,14 @@ export interface ChartUpdate {
   chartName: string;
   currentVersion: string;
   latestVersion: string;
+  /** What would break when upgrading */
+  warnings: string[];
+  /** CVEs from the monitor's minimum severity up that upgrading gets rid of / brings in, by
+   * severity; null when unknown */
+  vulnerabilities: { fixed: SeverityCounts; introduced: SeverityCounts } | null;
 }
+
+export type SeverityCounts = Partial<Record<CveSeverityValue, number>>;
 
 export interface NotificationContent {
   /** baseline: first successful scan of a monitor; changes: something new since the last one */
@@ -100,20 +108,61 @@ function relevantVulnerabilities(
 const chartKey = (c: { applicationName: string; chartName: string }) =>
   `${c.applicationName}|${c.chartName}`;
 
-function availableUpdates(scan: ScanSnapshot): Map<string, ChartUpdate> {
-  return new Map(
-    scan.charts
-      .filter((c) => c.status === 'outdated' && c.latestVersion)
-      .map((c) => [
-        chartKey(c),
-        {
-          applicationName: c.applicationName,
-          chartName: c.chartName,
-          currentVersion: c.currentVersion,
-          latestVersion: c.latestVersion!,
-        },
-      ]),
-  );
+function upgradeWarnings(upgrade: ChartUpgrade | null | undefined): string[] {
+  if (!upgrade) return [];
+  const warnings: string[] = [];
+  if (upgrade.renderError)
+    warnings.push(`fails to render with your values: ${upgrade.renderError}`);
+  if (upgrade.removedValues.length) {
+    warnings.push(`values no longer in the chart: ${upgrade.removedValues.join(', ')}`);
+  }
+  for (const change of upgrade.manifestChanges.filter((c) => c.immutableFields.length)) {
+    warnings.push(
+      `${change.resource}: immutable ${change.immutableFields.join(', ')} changes, sync fails until it is replaced`,
+    );
+  }
+  return warnings;
+}
+
+/** Most severe first, like the input */
+function countFrom(
+  list: { severity: CveSeverityValue }[],
+  minSeverity: NotifyRules['minSeverity'],
+): SeverityCounts {
+  const counts: SeverityCounts = {};
+  for (const { severity } of list) {
+    if (minSeverity && SEVERITY_RANK[severity] < SEVERITY_RANK[minSeverity]) continue;
+    counts[severity] = (counts[severity] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** Outdated charts the monitor's rules want to hear about */
+function availableUpdates(scan: ScanSnapshot, rules: NotifyRules): Map<string, ChartUpdate> {
+  if (rules.chartUpdates === 'off') return new Map();
+  const updates = scan.charts
+    .filter((c) => c.status === 'outdated' && c.latestVersion)
+    .map((c): ChartUpdate => {
+      // Upgrades stored before vulnerability comparisons existed have no such field
+      const vulns = c.upgrade?.vulnerabilities;
+      return {
+        applicationName: c.applicationName,
+        chartName: c.chartName,
+        currentVersion: c.currentVersion,
+        latestVersion: c.latestVersion!,
+        warnings: upgradeWarnings(c.upgrade),
+        vulnerabilities: vulns
+          ? {
+              fixed: countFrom(vulns.fixed, rules.minSeverity),
+              introduced: countFrom(vulns.introduced, rules.minSeverity),
+            }
+          : null,
+      };
+    })
+    .filter(
+      (u) => rules.chartUpdates !== 'fixes' || Object.keys(u.vulnerabilities?.fixed ?? {}).length,
+    );
+  return new Map(updates.map((u) => [chartKey(u), u]));
 }
 
 function describeVulnerabilities(vulns: NewVulnerability[], fixableOnly: boolean): string {
@@ -146,7 +195,7 @@ export function buildNotification(
   if (current.state !== 'succeeded') return null;
 
   const vulns = relevantVulnerabilities(current, rules);
-  const updates = rules.chartUpdates === 'off' ? new Map() : availableUpdates(current);
+  const updates = availableUpdates(current, rules);
 
   if (!previous) {
     // First scan: everything would be "new", so send one overview instead of a flood
@@ -167,10 +216,11 @@ export function buildNotification(
   const before = relevantVulnerabilities(previous, rules);
   const newVulns = [...vulns].filter(([key]) => !before.has(key)).map(([, v]) => v);
 
-  const previousLatest = new Map(previous.charts.map((c) => [chartKey(c), c.latestVersion]));
-  // A chart update is news once: when its latest version first shows up
+  // A chart update is news once: when its latest version first shows up (with 'fixes': first
+  // fixes something, the vulnerability DB keeps changing)
+  const previousUpdates = availableUpdates(previous, rules);
   const newUpdates = [...updates.values()].filter(
-    (u: ChartUpdate) => previousLatest.get(chartKey(u)) !== u.latestVersion,
+    (u) => previousUpdates.get(chartKey(u))?.latestVersion !== u.latestVersion,
   );
 
   if (newVulns.length === 0 && newUpdates.length === 0) return null;

@@ -36,8 +36,8 @@ export type Channel = z.infer<typeof channelSchema>;
 /** Lowest CVE severity that triggers a notification; null = don't notify about CVEs */
 export const notifySeveritySchema = z.enum(['CRITICAL', 'HIGH', 'MEDIUM']).nullable();
 
-/** off | any new chart version ('fixes' — only when it fixes CVEs — comes later) */
-export const chartUpdateModeSchema = z.enum(['off', 'any']);
+/** off | any new chart version | only versions whose upgrade fixes CVEs from `minSeverity` up */
+export const chartUpdateModeSchema = z.enum(['off', 'any', 'fixes']);
 export type ChartUpdateMode = z.infer<typeof chartUpdateModeSchema>;
 
 export const monitorNotificationsSchema = z.object({

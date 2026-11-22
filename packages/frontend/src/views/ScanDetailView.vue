@@ -2,7 +2,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import type {
-  ChartFinding,
+  ChartFindingDetail,
+  ChartUpgrade,
   CveFinding,
   CveSeverityValue,
   ImageFinding,
@@ -27,6 +28,7 @@ const STEPS: { phase: ScanPhaseValue; label: string }[] = [
   { phase: 'resolving', label: 'Finding ArgoCD applications' },
   { phase: 'chart_versions', label: 'Checking chart versions' },
   { phase: 'images', label: 'Finding images in charts' },
+  { phase: 'upgrades', label: 'Comparing with the latest chart versions' },
   { phase: 'vulnerabilities', label: 'Scanning images for vulnerabilities' },
 ];
 type StepStatus = 'done' | 'active' | 'failed' | 'todo';
@@ -76,7 +78,7 @@ function sortBySeverity(cves: CveFinding[]): CveFinding[] {
 
 interface ChartGroup {
   key: string;
-  chart: ChartFinding;
+  chart: ChartFindingDetail;
   images: ImageWithCves[];
   worstSeverity: CveSeverityValue | null;
 }
@@ -120,6 +122,34 @@ const chartGroups = computed<ChartGroup[]>(() => {
     };
   });
 });
+
+function upgradeRisky({ upgrade }: ChartFindingDetail): boolean {
+  return (
+    !!upgrade &&
+    (!!upgrade.renderError ||
+      upgrade.removedValues.length > 0 ||
+      upgrade.manifestChanges.some((c) => c.immutableFields.length > 0))
+  );
+}
+
+const addedOrRemoved = ({ manifestChanges }: ChartUpgrade) =>
+  manifestChanges.filter((c) => c.change !== 'changed');
+
+function changeSummary(upgrade: ChartUpgrade): string {
+  const changes = addedOrRemoved(upgrade);
+  return (['added', 'removed'] as const)
+    .map((kind) => [kind, changes.filter((c) => c.change === kind).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([kind, n]) => `${n} ${n === 1 ? 'resource' : 'resources'} ${kind}`)
+    .join(', ');
+}
+
+function vulnerabilitySides(vulns: NonNullable<ChartUpgrade['vulnerabilities']>) {
+  return [
+    { label: 'Fixes', short: 'fixed', list: vulns.fixed },
+    { label: 'Adds', short: 'new', list: vulns.introduced },
+  ].map((side) => ({ ...side, counts: countBySeverity(side.list.map((v) => v.severity)) }));
+}
 
 const expandedKeys = ref(new Set<string>());
 const expandedImageKeys = ref(new Set<string>());
@@ -258,10 +288,147 @@ onUnmounted(() => {
               </td>
               <td>
                 <span :class="`badge badge-${group.chart.status}`">{{ group.chart.status }}</span>
+                <Icon
+                  v-if="upgradeRisky(group.chart)"
+                  icon="lucide:alert-triangle"
+                  class="severity-icon medium"
+                  title="Upgrading to the latest version needs attention"
+                />
               </td>
             </tr>
             <tr v-if="expandedKeys.has(group.key)" class="expanded-row">
               <td colspan="6">
+                <div v-if="group.chart.upgrade" class="upgrade">
+                  <h3>Upgrade to {{ group.chart.latestVersion }}</h3>
+                  <p v-if="group.chart.upgrade.renderError" class="error mono">
+                    Does not render with your values: {{ group.chart.upgrade.renderError }}
+                  </p>
+                  <p v-if="group.chart.upgrade.removedValues.length">
+                    Values you set that the new chart no longer has (Helm ignores them):
+                    <code v-for="key in group.chart.upgrade.removedValues" :key="key">{{
+                      key
+                    }}</code>
+                  </p>
+                  <p
+                    v-if="
+                      !group.chart.upgrade.renderError &&
+                      addedOrRemoved(group.chart.upgrade).length === 0
+                    "
+                    class="text-muted"
+                  >
+                    No resources added or removed.
+                  </p>
+                  <p
+                    v-for="change in group.chart.upgrade.manifestChanges.filter(
+                      (c) => c.immutableFields.length,
+                    )"
+                    :key="change.resource"
+                    class="immutable"
+                  >
+                    <Icon icon="lucide:alert-triangle" />
+                    <span>
+                      <span class="mono">{{ change.resource }}</span>: immutable
+                      {{ change.immutableFields.join(', ') }} changes, the sync fails until the
+                      resource is deleted and recreated
+                    </span>
+                  </p>
+                  <details v-if="addedOrRemoved(group.chart.upgrade).length">
+                    <summary class="changes-summary">
+                      {{ changeSummary(group.chart.upgrade) }}
+                    </summary>
+                    <ul class="resource-list">
+                      <li
+                        v-for="change in addedOrRemoved(group.chart.upgrade)"
+                        :key="change.resource"
+                      >
+                        <span :class="['change-badge', change.change]">{{ change.change }}</span>
+                        <span class="mono">{{ change.resource }}</span>
+                      </li>
+                    </ul>
+                  </details>
+                  <template v-if="group.chart.upgrade.vulnerabilities">
+                    <p
+                      v-if="
+                        group.chart.upgrade.vulnerabilities.fixed.length === 0 &&
+                        group.chart.upgrade.vulnerabilities.introduced.length === 0
+                      "
+                      class="text-muted"
+                    >
+                      Same vulnerabilities as the current version.
+                    </p>
+                    <details v-else>
+                      <summary class="changes-summary">
+                        <template
+                          v-for="side in vulnerabilitySides(group.chart.upgrade.vulnerabilities)"
+                          :key="side.label"
+                        >
+                          <span v-if="side.list.length" class="vuln-side">
+                            {{ side.label }}
+                            <span
+                              v-for="severity in SEVERITY_ORDER.filter((s) => side.counts[s])"
+                              :key="severity"
+                              :class="['cve-count', severity.toLowerCase()]"
+                              :title="`${side.counts[severity]} ${severity} severity`"
+                              >{{ side.counts[severity] }}</span
+                            >
+                          </span>
+                        </template>
+                      </summary>
+                      <div class="table-scroll">
+                        <table class="nested-table">
+                          <thead>
+                            <tr>
+                              <th></th>
+                              <th>Vulnerability</th>
+                              <th>Package</th>
+                              <th>Severity</th>
+                              <th>Image</th>
+                              <th>Title</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template
+                              v-for="side in vulnerabilitySides(
+                                group.chart.upgrade.vulnerabilities,
+                              )"
+                              :key="side.label"
+                            >
+                              <tr v-for="cve in side.list" :key="cve.vulnerabilityId + cve.pkgName">
+                                <td class="text-muted">{{ side.short }}</td>
+                                <td class="mono">{{ cve.vulnerabilityId }}</td>
+                                <td>
+                                  <span class="truncate" :title="cve.pkgName">{{
+                                    cve.pkgName
+                                  }}</span>
+                                </td>
+                                <td>
+                                  <span :class="['severity-badge', cve.severity.toLowerCase()]">{{
+                                    cve.severity
+                                  }}</span>
+                                </td>
+                                <td>
+                                  <span class="truncate" :title="cve.image">{{ cve.image }}</span>
+                                </td>
+                                <td class="text-muted">
+                                  <span class="truncate-title" :title="cve.title ?? undefined">{{
+                                    cve.title ?? '—'
+                                  }}</span>
+                                </td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  </template>
+                  <p v-else-if="!group.chart.upgrade.renderError" class="text-muted">
+                    {{
+                      isInProgress
+                        ? 'Scanning the new version’s images…'
+                        : 'Vulnerabilities of the new version could not be determined; the skipped items above say why.'
+                    }}
+                  </p>
+                </div>
                 <p v-if="group.images.length === 0" class="text-muted">
                   {{ imagesPending ? 'Finding images…' : 'No images found for this chart.' }}
                 </p>
@@ -522,6 +689,53 @@ progress {
 .nested-table td {
   padding: var(--space-2) var(--space-3);
   white-space: nowrap;
+}
+
+.upgrade {
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-4);
+  display: grid;
+  gap: var(--space-2);
+}
+.upgrade h3 {
+  font-size: 1rem;
+}
+.upgrade code {
+  margin-left: var(--space-1);
+}
+.changes-summary {
+  cursor: pointer;
+}
+.vuln-side {
+  margin-right: var(--space-3);
+}
+.resource-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  display: grid;
+  gap: var(--space-1);
+}
+.change-badge {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.8rem;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg);
+  color: var(--color-text-muted);
+}
+.change-badge.added {
+  color: var(--color-primary);
+}
+.change-badge.removed {
+  color: #ef4444;
+}
+.immutable {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: #f97316;
+  font-size: 0.875rem;
 }
 
 .truncate {

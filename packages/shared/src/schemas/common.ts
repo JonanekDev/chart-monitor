@@ -36,6 +36,7 @@ export const ScanPhase = {
   RESOLVING: 'resolving',
   CHART_VERSIONS: 'chart_versions',
   IMAGES: 'images',
+  UPGRADES: 'upgrades',
   VULNERABILITIES: 'vulnerabilities',
 } as const;
 
@@ -44,6 +45,7 @@ export const scanPhaseSchema = z.enum([
   ScanPhase.RESOLVING,
   ScanPhase.CHART_VERSIONS,
   ScanPhase.IMAGES,
+  ScanPhase.UPGRADES,
   ScanPhase.VULNERABILITIES,
 ]);
 

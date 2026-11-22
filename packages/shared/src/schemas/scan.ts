@@ -19,6 +19,54 @@ export const chartFindingSchema = z.object({
 
 export type ChartFinding = z.infer<typeof chartFindingSchema>;
 
+export const manifestChangeSchema = z.object({
+  /** e.g. `Deployment monitoring/grafana` */
+  resource: z.string(),
+  /** `changed` only when immutable fields change */
+  change: z.enum(['added', 'removed', 'changed']),
+  /** The sync fails until the resource is replaced */
+  immutableFields: z.array(z.string()),
+});
+
+export type ManifestChange = z.infer<typeof manifestChangeSchema>;
+
+/** One CVE + package, as found in an application's images (once, even if several images have it) */
+export const vulnerabilityChangeSchema = z.object({
+  vulnerabilityId: z.string(),
+  pkgName: z.string(),
+  severity: cveSeveritySchema,
+  image: z.string(),
+  title: z.string().nullable(),
+});
+
+export type VulnerabilityChange = z.infer<typeof vulnerabilityChangeSchema>;
+
+/** What upgrading an outdated chart to its latest version would change, with the app's values */
+export const chartUpgradeSchema = z.object({
+  /** Keys the app sets that the new chart's values.yaml no longer has (silently ignored) */
+  removedValues: z.array(z.string()),
+  manifestChanges: z.array(manifestChangeSchema),
+  /** The latest version doesn't render with the app's values (e.g. a newly required value) */
+  renderError: z.string().nullable(),
+  /** CVEs the upgrade gets rid of / brings in, most severe first. null while the images are still
+   * being scanned, or when a scan failed (a partial comparison would be misleading) */
+  vulnerabilities: z
+    .object({
+      fixed: z.array(vulnerabilityChangeSchema),
+      introduced: z.array(vulnerabilityChangeSchema),
+    })
+    .nullable(),
+});
+
+export type ChartUpgrade = z.infer<typeof chartUpgradeSchema>;
+
+export const chartFindingDetailSchema = chartFindingSchema.extend({
+  /** Only for outdated charts */
+  upgrade: chartUpgradeSchema.nullable(),
+});
+
+export type ChartFindingDetail = z.infer<typeof chartFindingDetailSchema>;
+
 export const imageFindingSchema = z.object({
   applicationName: z.string(),
   image: z.string(),
@@ -81,7 +129,7 @@ export type ScanSummary = z.infer<typeof scanSummarySchema>;
 export const scanDetailSchema = scanSummarySchema.extend({
   /** What the scan skipped or could not process (unsupported generators, missing value files…) */
   warnings: z.array(z.string()),
-  chartFindings: z.array(chartFindingSchema),
+  chartFindings: z.array(chartFindingDetailSchema),
   imageFindings: z.array(imageFindingSchema),
   cveFindings: z.array(cveFindingSchema),
 });

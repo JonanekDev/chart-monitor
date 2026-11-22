@@ -1,4 +1,4 @@
-import type { NotificationContent } from './buildNotification.js';
+import type { ChartUpdate, NotificationContent, SeverityCounts } from './buildNotification.js';
 
 export interface NotificationContext {
   /** Short repo label, e.g. org/repo@main */
@@ -12,6 +12,19 @@ const MAX_LISTED = 10;
 const MAX_DESCRIPTION = 3800;
 
 const COLORS = { failure: 0xef4444, critical: 0xef4444, high: 0xf97316, other: 0x1caf87 };
+
+const describeCounts = (counts: SeverityCounts) =>
+  Object.entries(counts)
+    .map(([severity, n]) => `${n} ${severity.toLowerCase()}`)
+    .join(', ');
+
+/** ` · fixes 3 critical, 10 high · adds 1 high` */
+function describeChange({ vulnerabilities }: ChartUpdate): string {
+  if (!vulnerabilities) return '';
+  const fixed = describeCounts(vulnerabilities.fixed);
+  const introduced = describeCounts(vulnerabilities.introduced);
+  return `${fixed ? ` · fixes ${fixed}` : ''}${introduced ? ` · adds ${introduced}` : ''}`;
+}
 
 function lines(content: NotificationContent): string[] {
   const out: string[] = [];
@@ -32,7 +45,10 @@ function lines(content: NotificationContent): string[] {
   if (content.chartUpdates.length) {
     out.push('', '**Chart updates**');
     for (const u of content.chartUpdates.slice(0, MAX_LISTED)) {
-      out.push(`• ${u.chartName} ${u.currentVersion} → ${u.latestVersion} (${u.applicationName})`);
+      out.push(
+        `• ${u.chartName} ${u.currentVersion} → ${u.latestVersion} (${u.applicationName})${describeChange(u)}`,
+      );
+      for (const warning of u.warnings) out.push(`  ⚠ ${warning}`);
     }
     const more = content.chartUpdates.length - MAX_LISTED;
     if (more > 0) out.push(`…and ${more} more`);

@@ -6,6 +6,8 @@ ArgoCD `Application`s and `ApplicationSet`s, then checks every Helm chart they d
 - is there a newer chart version?
 - are there newer tags for the images the chart renders (with the app's own values)?
 - what vulnerabilities do those images have (Trivy)?
+- what would upgrading an outdated chart change: vulnerabilities it fixes and brings in, values the
+  new version no longer has, a failing render, immutable fields that make the sync fail?
 
 Works with any git host (GitHub, GitLab, Gitea/Forgejo, self-hosted).
 
@@ -66,7 +68,8 @@ GIT_CREDENTIALS=https://oauth2:glpat-xxx@gitlab.example.com,https://me:xxx@gitea
 
 **Notifications:** add a Discord or JSON webhook channel under Settings (gear icon), then pick it in a
 monitor along with what to report: new vulnerabilities from a chosen severity (optionally only ones
-with a fix), new chart versions and failed scans. The first scan sends an overview, later scans only
+with a fix), new chart versions (all of them, or only those whose upgrade fixes vulnerabilities from
+that severity up) and failed scans. The first scan sends an overview, later scans only
 what is new since the previous one.
 
 **Internal CA:** if your git server or Helm repo uses a certificate from a private CA, uncomment the

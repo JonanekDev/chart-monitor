@@ -47,7 +47,7 @@ model Monitor {
   /// CRITICAL | HIGH | MEDIUM; null = no CVE notifications
   notifyMinSeverity  String?              @default("HIGH")
   notifyOnlyFixable  Boolean              @default(true)
-  /// off | any
+  /// off | any | fixes (only versions whose upgrade fixes CVEs)
   notifyChartUpdates String               @default("any")
   notifyOnFailure    Boolean              @default(true)
 }
@@ -102,6 +102,8 @@ model ChartFinding {
   latestVersion      String?
   status             VersionStatus
   note               String?
+  /// JSON ChartUpgrade; null unless outdated
+  upgrade            String?
 
   @@index([scanId])
 }

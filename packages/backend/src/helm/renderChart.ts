@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { parseAllDocuments } from 'yaml';
+import { parse, parseAllDocuments } from 'yaml';
 import type { ApplicationSource } from '../argocd/types.js';
 import { HelmResolutionError } from '../errors.js';
 
@@ -19,12 +19,16 @@ const ASSUMED_API_VERSIONS = [
   'monitoring.coreos.com/v1/PrometheusRule',
 ];
 
-function buildHelmArgs(source: ApplicationSource, valuesFilePaths: string[]): string[] {
+function chartArgs(source: ApplicationSource): string[] {
   const isOci = source.repoURL.startsWith('oci://');
   const chartRef = isOci ? `${source.repoURL}/${source.chart}` : (source.chart as string);
-
-  const args = ['template', 'release', chartRef, '--version', source.targetRevision as string];
+  const args = [chartRef, '--version', source.targetRevision as string];
   if (!isOci) args.push('--repo', source.repoURL);
+  return args;
+}
+
+function buildHelmArgs(source: ApplicationSource, valuesFilePaths: string[]): string[] {
+  const args = ['template', 'release', ...chartArgs(source)];
   for (const apiVersion of [...ASSUMED_API_VERSIONS, ...(source.helm?.apiVersions ?? [])]) {
     args.push('--api-versions', apiVersion);
   }
@@ -53,13 +57,20 @@ function collectImages(node: unknown, images: Set<string>): void {
   }
 }
 
-/** Shells out to `helm template` to render the chart at its currently deployed version and
- * extracts every container image reference from the rendered manifests. `valuesDocuments` are
- * YAML values passed as `-f` in order, later ones overriding earlier ones. */
-export async function renderChartImages(
+/** Every container image reference in rendered manifests */
+export function findImages(manifests: unknown[]): string[] {
+  const images = new Set<string>();
+  collectImages(manifests, images);
+  return [...images];
+}
+
+/** Shells out to `helm template` to render the chart at `source.targetRevision` and returns the
+ * parsed manifests. `valuesDocuments` are YAML values passed as `-f` in order, later ones
+ * overriding earlier ones. */
+export async function renderChart(
   source: ApplicationSource,
   valuesDocuments: string[] = [],
-): Promise<string[]> {
+): Promise<unknown[]> {
   if (!source.chart || !source.targetRevision) return [];
 
   const tempDir = await mkdtemp(path.join(tmpdir(), 'chart-monitor-'));
@@ -75,12 +86,9 @@ export async function renderChartImages(
     const { stdout } = await execFileAsync('helm', buildHelmArgs(source, valuesFilePaths), {
       maxBuffer: 1024 * 1024 * 20,
     });
-
-    const images = new Set<string>();
-    for (const doc of parseAllDocuments(stdout)) {
-      collectImages(doc.toJS(), images);
-    }
-    return [...images];
+    return parseAllDocuments(stdout)
+      .map((doc) => doc.toJS() as unknown)
+      .filter((manifest) => manifest != null);
   } catch (cause) {
     throw new HelmResolutionError(
       `helm template failed for chart "${source.chart}" @ ${source.targetRevision}`,
@@ -88,5 +96,20 @@ export async function renderChartImages(
     );
   } finally {
     await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+/** The chart's default values.yaml (without its subcharts' defaults) */
+export async function showChartValues(source: ApplicationSource): Promise<unknown> {
+  try {
+    const { stdout } = await execFileAsync('helm', ['show', 'values', ...chartArgs(source)], {
+      maxBuffer: 1024 * 1024 * 20,
+    });
+    return parse(stdout) as unknown;
+  } catch (cause) {
+    throw new HelmResolutionError(
+      `helm show values failed for chart "${source.chart}" @ ${source.targetRevision}`,
+      cause,
+    );
   }
 }

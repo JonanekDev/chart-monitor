@@ -39,6 +39,12 @@ const SEVERITY_OPTIONS: { label: string; value: MonitorNotifications['minSeverit
   { label: 'Medium and above', value: 'MEDIUM' },
 ];
 
+const CHART_UPDATE_OPTIONS: { label: string; value: MonitorNotifications['chartUpdates'] }[] = [
+  { label: 'Off', value: 'off' },
+  { label: 'Any new version', value: 'any' },
+  { label: 'Only when upgrading fixes vulnerabilities', value: 'fixes' },
+];
+
 const loadError = ref<string | null>(null);
 const fieldError = ref<string | null>(null);
 const submitError = ref<string | null>(null);
@@ -221,18 +227,22 @@ async function onSubmit() {
           />
           Only vulnerabilities that have a fix available
         </label>
-        <label class="check">
-          <input
-            type="checkbox"
-            :checked="notifications.chartUpdates === 'any'"
-            @change="
-              notifications.chartUpdates = ($event.target as HTMLInputElement).checked
-                ? 'any'
-                : 'off'
-            "
-          />
-          New chart versions
-        </label>
+        <div class="field">
+          <label for="chartUpdates">New chart versions</label>
+          <select id="chartUpdates" v-model="notifications.chartUpdates">
+            <option
+              v-for="option in CHART_UPDATE_OPTIONS"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+          <p v-if="notifications.chartUpdates === 'fixes'" class="text-muted hint">
+            Vulnerabilities count from the level chosen above
+            {{ notifications.minSeverity ? '' : '(any level while that is off)' }}.
+          </p>
+        </div>
         <label class="check">
           <input v-model="notifications.onFailure" type="checkbox" />
           Failed scans

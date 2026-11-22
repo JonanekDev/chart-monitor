@@ -39,7 +39,7 @@ const chart = (latestVersion: string | null, status = 'outdated') => ({
 });
 const scan = (
   cves: Cve[],
-  charts = [chart('1.20.4', 'up_to_date')],
+  charts: ScanSnapshot['charts'] = [chart('1.20.4', 'up_to_date')],
   state = 'succeeded',
 ): ScanSnapshot => ({
   state,
@@ -119,13 +119,75 @@ describe('buildNotification', () => {
         chartName: 'cilium',
         currentVersion: '1.20.4',
         latestVersion: '1.20.5',
+        warnings: [],
+        vulnerabilities: null,
       },
     ]);
     expect(buildNotification(rules, now, now)).toBeNull(); // same latest version again
     expect(buildNotification({ ...rules, chartUpdates: 'off' }, now, before)).toBeNull();
+    const risky = scan(
+      [],
+      [
+        {
+          ...chart('1.20.5'),
+          upgrade: {
+            removedValues: ['a.b'],
+            manifestChanges: [],
+            renderError: null,
+            vulnerabilities: null,
+          },
+        },
+      ],
+    );
+    expect(buildNotification(rules, risky, before)!.chartUpdates[0]?.warnings).toEqual([
+      'values no longer in the chart: a.b',
+    ]);
     expect(buildNotification(rules, scan([], [chart('1.21.0')]), now)!.summary).toBe(
       'New: 1 chart update',
     );
+  });
+
+  it("with chartUpdates 'fixes', announces only upgrades that fix CVEs from minSeverity up", () => {
+    const change = (id: string, severity: Cve['severity']) => ({
+      vulnerabilityId: id,
+      pkgName: 'openssl',
+      severity,
+      image: 'quay.io/cilium/cilium',
+      title: null,
+    });
+    const upgraded = (fixed: ReturnType<typeof change>[]) =>
+      scan(
+        [],
+        [
+          {
+            ...chart('1.20.5'),
+            upgrade: {
+              removedValues: [],
+              manifestChanges: [],
+              renderError: null,
+              vulnerabilities: { fixed, introduced: [change('CVE-9', 'HIGH')] },
+            },
+          },
+        ],
+      );
+    const fixes = { ...rules, chartUpdates: 'fixes' as const };
+    const before = scan([], [chart('1.20.4', 'up_to_date')]);
+
+    expect(buildNotification(fixes, upgraded([change('CVE-1', 'MEDIUM')]), before)).toBeNull();
+
+    const fixing = upgraded([change('CVE-1', 'CRITICAL'), change('CVE-2', 'LOW')]);
+    const content = buildNotification(fixes, fixing, before)!;
+    expect(content.chartUpdates[0]?.vulnerabilities).toEqual({
+      fixed: { CRITICAL: 1 },
+      introduced: { HIGH: 1 },
+    });
+    expect(toWebhookPayload(content, { repo: 'o/r', scanUrl: null }).text).toContain(
+      'cilium 1.20.4 → 1.20.5 (cilium) · fixes 1 critical · adds 1 high',
+    );
+    // Already announced, even though the previous scan's latest version was the same
+    expect(buildNotification(fixes, fixing, fixing)).toBeNull();
+    // Starts fixing something later (vulnerability DB update): news then
+    expect(buildNotification(fixes, fixing, upgraded([]))).not.toBeNull();
   });
 
   it('reports failures unless turned off', () => {

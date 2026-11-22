@@ -21,20 +21,38 @@ vi.mock('../helm/chartVersions.js', () => ({
   normalizeChartRepoUrl: (url: string) => url,
   fetchChartVersions: async () => ['1.0.0', '2.0.0'],
 }));
-vi.mock('../helm/renderChart.js', () => ({
-  renderChartImages: async () => ['docker.io/library/redis:7.0'],
+const deployment = (tag: string, app: string) => ({
+  kind: 'Deployment',
+  metadata: { name: 'redis' },
+  spec: {
+    selector: { matchLabels: { app } },
+    template: {
+      spec: { containers: [{ name: 'redis', image: `docker.io/library/redis:${tag}` }] },
+    },
+  },
+});
+vi.mock('../helm/renderChart.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  renderChart: async ({ targetRevision }: { targetRevision: string }) =>
+    targetRevision === '1.0.0' ? [deployment('7.0', 'redis')] : [deployment('7.2', 'cache')],
+  showChartValues: async () => ({}),
 }));
 vi.mock('../registry/imageRef.js', () => ({ fetchImageTags: async () => ['7.0', '7.2'] }));
-const scanImage = vi.fn(async () => [
-  {
-    vulnerabilityId: 'CVE-1',
-    pkgName: 'openssl',
-    installedVersion: '1',
-    fixedVersion: '2',
-    severity: 'HIGH' as const,
-    title: null,
-  },
-]);
+// The upgraded image (redis:7.2) has the CVE fixed
+const scanImage = vi.fn(async (image: string) =>
+  image.endsWith(':7.0')
+    ? [
+        {
+          vulnerabilityId: 'CVE-1',
+          pkgName: 'openssl',
+          installedVersion: '1',
+          fixedVersion: '2',
+          severity: 'HIGH' as const,
+          title: null,
+        },
+      ]
+    : [],
+);
 vi.mock('../trivy/scanImage.js', () => ({ scanImageForVulnerabilities: scanImage }));
 
 const { executeScan } = await import('../scan/runScan.js');
@@ -49,6 +67,13 @@ describe('executeScan', () => {
         phase: async (phase, total) => events.push(`phase:${phase}:${total ?? 0}`),
         step: async () => {},
         chartFinding: async (f) => events.push(`chart:${f.applicationName}:${f.status}`),
+        chartUpgrade: async (chart, { manifestChanges, vulnerabilities }) =>
+          events.push(
+            `upgrade:${chart.applicationName}:${manifestChanges.flatMap((c) => c.immutableFields)}` +
+              (vulnerabilities
+                ? `:fixes ${vulnerabilities.fixed.map((v) => v.vulnerabilityId)}`
+                : ''),
+          ),
         imageFindings: async (f) => events.push(`images:${f.length}`),
         imageScanned: async (image, found) => {
           events.push(`scanned:${image.repository}:${image.tag}`);
@@ -67,10 +92,16 @@ describe('executeScan', () => {
       'phase:images:2',
       'images:1',
       'images:1',
-      'phase:vulnerabilities:1',
+      'phase:upgrades:2',
+      'upgrade:app-a:spec.selector',
+      'upgrade:app-b:spec.selector',
+      'phase:vulnerabilities:2',
       'scanned:docker.io/library/redis:7.0',
+      'upgrade:app-a:spec.selector:fixes CVE-1',
+      'upgrade:app-b:spec.selector:fixes CVE-1',
     ]);
-    expect(scanImage).toHaveBeenCalledTimes(1);
+    // Once per image, though two applications use it; the upgraded image isn't stored as findings
+    expect(scanImage).toHaveBeenCalledTimes(2);
     expect(cves).toEqual([
       expect.objectContaining({ applicationName: 'app-a', image: 'docker.io/library/redis' }),
       expect.objectContaining({ applicationName: 'app-b', image: 'docker.io/library/redis' }),
