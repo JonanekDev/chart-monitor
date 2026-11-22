@@ -8,13 +8,14 @@ import type { PrismaClient } from '../generated/prisma/client.js';
 import { buildNotification, type NotifyRules, type ScanSnapshot } from './buildNotification.js';
 import { sendNotification } from './send.js';
 
-const withFindings = { chartFindings: true, cveFindings: true } as const;
+const withFindings = { chartFindings: true, cveFindings: true, imageFindings: true } as const;
 
 function snapshot(scan: {
   state: string;
   errorMessage: string | null;
   chartFindings: (Omit<ScanSnapshot['charts'][number], 'upgrade'> & { upgrade: string | null })[];
   cveFindings: (Omit<ScanSnapshot['cves'][number], 'severity'> & { severity: string })[];
+  imageFindings: ScanSnapshot['images'];
 }): ScanSnapshot {
   return {
     state: scan.state,
@@ -24,6 +25,7 @@ function snapshot(scan: {
       upgrade: c.upgrade ? (JSON.parse(c.upgrade) as ChartUpgrade) : null,
     })),
     cves: scan.cveFindings.map((c) => ({ ...c, severity: c.severity as CveSeverityValue })),
+    images: scan.imageFindings,
   };
 }
 

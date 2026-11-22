@@ -1,4 +1,10 @@
-import type { ChartUpdate, NotificationContent, SeverityCounts } from './buildNotification.js';
+import { countBySeverity } from '@chart-monitor/shared';
+import {
+  describeCounts,
+  type ChartUpdate,
+  type NotificationContent,
+  type VulnerabilityGroup,
+} from './buildNotification.js';
 
 export interface NotificationContext {
   /** Short repo label, e.g. org/repo@main */
@@ -13,11 +19,6 @@ const MAX_DESCRIPTION = 3800;
 
 const COLORS = { failure: 0xef4444, critical: 0xef4444, high: 0xf97316, other: 0x1caf87 };
 
-const describeCounts = (counts: SeverityCounts) =>
-  Object.entries(counts)
-    .map(([severity, n]) => `${n} ${severity.toLowerCase()}`)
-    .join(', ');
-
 /** ` · fixes 3 critical, 10 high · adds 1 high` */
 function describeChange({ vulnerabilities }: ChartUpdate): string {
   if (!vulnerabilities) return '';
@@ -26,20 +27,45 @@ function describeChange({ vulnerabilities }: ChartUpdate): string {
   return `${fixed ? ` · fixes ${fixed}` : ''}${introduced ? ` · adds ${introduced}` : ''}`;
 }
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/** `• **CRITICAL** CVE-1 in curl, curl-libs 8.22.0 → 8.23.0 (+2 other versions) · 7 images (harbor)` */
+function describeGroup(g: VulnerabilityGroup): string {
+  const [first, ...others] = g.versions;
+  const versions = first
+    ? ` ${first.installed}${first.fixed ? ` → ${first.fixed}` : ''}${others.length ? ` (+${plural(others.length, 'other version')})` : ''}`
+    : '';
+  const where = g.knownElsewhere
+    ? `+${plural(g.images.length, 'new image')}`
+    : g.images.length === 1
+      ? `\`${g.images[0]}\``
+      : `${g.images.length} images`;
+  return `• **${g.severity}** ${g.vulnerabilityId} in ${g.packages.join(', ')}${versions} · ${where} (${g.applications.join(', ')})`;
+}
+
+function groupSection(out: string[], heading: string, groups: VulnerabilityGroup[]): void {
+  const counts = describeCounts(countBySeverity(groups.filter((g) => !g.knownElsewhere)));
+  out.push('', `**${heading}**${groups.length ? `: ${counts || 'none new'}` : ': none'}`);
+  for (const group of groups.slice(0, MAX_LISTED)) out.push(describeGroup(group));
+  const more = groups.length - MAX_LISTED;
+  if (more > 0) out.push(`…and ${more} more`);
+}
+
 function lines(content: NotificationContent): string[] {
   const out: string[] = [];
   if (content.error) out.push(`\`${content.error.slice(0, 500)}\``);
 
-  if (content.newVulnerabilities.length) {
-    out.push('', '**Vulnerabilities**');
-    for (const v of content.newVulnerabilities.slice(0, MAX_LISTED)) {
-      const fix = v.fixedVersion ? ` → fixed in ${v.fixedVersion}` : '';
-      out.push(
-        `• **${v.severity}** ${v.vulnerabilityId} in ${v.pkgName} ${v.installedVersion}${fix} · \`${v.image}\``,
-      );
+  const groups = content.vulnerabilityGroups;
+  if (content.kind === 'baseline') {
+    if (groups.length) groupSection(out, 'Vulnerabilities', groups);
+  } else {
+    const advisories = groups.filter((g) => g.reason === 'advisory');
+    const introduced = groups.filter((g) => g.reason === 'change');
+    if (advisories.length) groupSection(out, 'New advisories for unchanged images', advisories);
+    // With advisories, say explicitly that nothing you changed brought any in
+    if (advisories.length || introduced.length) {
+      groupSection(out, 'Introduced by changes', introduced);
     }
-    const more = content.newVulnerabilities.length - MAX_LISTED;
-    if (more > 0) out.push(`…and ${more} more`);
   }
 
   if (content.chartUpdates.length) {

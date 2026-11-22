@@ -70,6 +70,7 @@ export async function sendTestNotification(prisma: PrismaClient, id: string): Pr
         kind: 'changes',
         summary: 'Test notification: this channel works.',
         newVulnerabilities: [],
+        vulnerabilityGroups: [],
         chartUpdates: [],
         error: null,
       },

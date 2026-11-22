@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
-import type {
-  ChartFindingDetail,
-  ChartUpgrade,
-  CveFinding,
-  CveSeverityValue,
-  ImageFinding,
-  ScanDetail,
-  ScanPhaseValue,
+import {
+  countBySeverity,
+  SEVERITIES,
+  type ChartFindingDetail,
+  type ChartUpgrade,
+  type CveFinding,
+  type CveSeverityValue,
+  type ImageFinding,
+  type ScanDetail,
+  type ScanPhaseValue,
+  type SeverityCounts,
 } from '@chart-monitor/shared';
 import { getScan } from '../api/client.js';
 
@@ -56,14 +59,12 @@ function stepStatus(index: number): StepStatus {
 }
 
 // Worst-to-best. Only MEDIUM+ get a chart-header icon — LOW/UNKNOWN aren't worth flagging at a glance.
-const SEVERITY_ORDER: CveSeverityValue[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
+const SEVERITY_ORDER = SEVERITIES;
 const SEVERITY_ICON: Partial<Record<CveSeverityValue, string>> = {
   CRITICAL: 'lucide:flame',
   HIGH: 'lucide:alert-octagon',
   MEDIUM: 'lucide:alert-triangle',
 };
-
-type SeverityCounts = Partial<Record<CveSeverityValue, number>>;
 
 interface ImageWithCves extends ImageFinding {
   cveCounts: SeverityCounts;
@@ -80,18 +81,18 @@ interface ChartGroup {
   key: string;
   chart: ChartFindingDetail;
   images: ImageWithCves[];
+  /** Distinct ids across all of the app's images (not the sum of the image rows) */
+  cveCounts: SeverityCounts;
   worstSeverity: CveSeverityValue | null;
 }
 
-function countBySeverity(severities: CveSeverityValue[]): SeverityCounts {
-  const counts: SeverityCounts = {};
-  for (const severity of severities) counts[severity] = (counts[severity] ?? 0) + 1;
-  return counts;
-}
+const describeCounts = (counts: SeverityCounts) =>
+  Object.entries(counts)
+    .map(([severity, n]) => `${n} ${severity.toLowerCase()}`)
+    .join(', ');
 
-function worstSeverityOf(counts: SeverityCounts): CveSeverityValue | null {
-  return SEVERITY_ORDER.find((severity) => (counts[severity] ?? 0) > 0) ?? null;
-}
+// Black Duck advisories often describe the same issue as a CVE under another id
+const isVendorAdvisory = (id: string) => id.startsWith('BDSA-');
 
 // CVE/image findings only carry `applicationName`, not which chart they came from — fine in
 // practice since each application currently resolves to a single chart source, but two chart
@@ -107,18 +108,18 @@ const chartGroups = computed<ChartGroup[]>(() => {
         const cves = cveFindings.filter(
           (cve) => cve.applicationName === chart.applicationName && cve.image === image.image,
         );
-        return { ...image, cveCounts: countBySeverity(cves.map((c) => c.severity)), cves };
+        return { ...image, cveCounts: countBySeverity(cves), cves };
       });
 
-    const appSeverities = cveFindings
-      .filter((cve) => cve.applicationName === chart.applicationName)
-      .map((cve) => cve.severity);
-
+    const cveCounts = countBySeverity(
+      cveFindings.filter((cve) => cve.applicationName === chart.applicationName),
+    );
     return {
       key: `${chart.applicationName}-${chart.chartName}`,
       chart,
       images,
-      worstSeverity: worstSeverityOf(countBySeverity(appSeverities)),
+      cveCounts,
+      worstSeverity: SEVERITIES.find((severity) => cveCounts[severity]) ?? null,
     };
   });
 });
@@ -148,7 +149,7 @@ function vulnerabilitySides(vulns: NonNullable<ChartUpgrade['vulnerabilities']>)
   return [
     { label: 'Fixes', short: 'fixed', list: vulns.fixed },
     { label: 'Adds', short: 'new', list: vulns.introduced },
-  ].map((side) => ({ ...side, counts: countBySeverity(side.list.map((v) => v.severity)) }));
+  ].map((side) => ({ ...side, counts: countBySeverity(side.list) }));
 }
 
 const expandedKeys = ref(new Set<string>());
@@ -272,7 +273,7 @@ onUnmounted(() => {
                   v-if="group.worstSeverity && SEVERITY_ICON[group.worstSeverity]"
                   :icon="SEVERITY_ICON[group.worstSeverity] as string"
                   :class="['severity-icon', group.worstSeverity.toLowerCase()]"
-                  :title="`Worst vulnerability severity: ${group.worstSeverity}`"
+                  :title="`Vulnerabilities across all images: ${describeCounts(group.cveCounts)}`"
                 />
               </td>
               <td>{{ group.chart.chartName }}</td>
@@ -395,7 +396,19 @@ onUnmounted(() => {
                             >
                               <tr v-for="cve in side.list" :key="cve.vulnerabilityId + cve.pkgName">
                                 <td class="text-muted">{{ side.short }}</td>
-                                <td class="mono">{{ cve.vulnerabilityId }}</td>
+                                <td
+                                  :class="[
+                                    'mono',
+                                    { 'vendor-advisory': isVendorAdvisory(cve.vulnerabilityId) },
+                                  ]"
+                                  :title="
+                                    isVendorAdvisory(cve.vulnerabilityId)
+                                      ? 'Black Duck advisory: may describe the same issue as a CVE listed here'
+                                      : undefined
+                                  "
+                                >
+                                  {{ cve.vulnerabilityId }}
+                                </td>
                                 <td>
                                   <span class="truncate" :title="cve.pkgName">{{
                                     cve.pkgName
@@ -514,7 +527,21 @@ onUnmounted(() => {
                                     v-for="cve in sortBySeverity(image.cves)"
                                     :key="cve.vulnerabilityId + cve.pkgName"
                                   >
-                                    <td class="mono">{{ cve.vulnerabilityId }}</td>
+                                    <td
+                                      :class="[
+                                        'mono',
+                                        {
+                                          'vendor-advisory': isVendorAdvisory(cve.vulnerabilityId),
+                                        },
+                                      ]"
+                                      :title="
+                                        isVendorAdvisory(cve.vulnerabilityId)
+                                          ? 'Black Duck advisory: may describe the same issue as a CVE listed here'
+                                          : undefined
+                                      "
+                                    >
+                                      {{ cve.vulnerabilityId }}
+                                    </td>
                                     <td>
                                       <span class="truncate" :title="cve.pkgName">{{
                                         cve.pkgName
@@ -705,6 +732,10 @@ progress {
 }
 .changes-summary {
   cursor: pointer;
+}
+.vendor-advisory {
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 .vuln-side {
   margin-right: var(--space-3);

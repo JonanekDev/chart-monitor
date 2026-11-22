@@ -2,3 +2,4 @@ export * from './schemas/common.js';
 export * from './schemas/scan.js';
 export * from './schemas/monitor.js';
 export * from './schemas/notification.js';
+export * from './vulnerabilities.js';

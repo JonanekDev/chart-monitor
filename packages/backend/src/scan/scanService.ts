@@ -1,5 +1,7 @@
 import {
+  countBySeverity,
   CveSeverity,
+  type CveSeverityValue,
   ScanState,
   VersionStatus,
   type ChartUpgrade,
@@ -51,31 +53,35 @@ export async function countFindings(
       where: { scanId: { in: scanIds }, status: VersionStatus.OUTDATED },
       _count: true,
     }),
-    prisma.cveFinding.groupBy({
-      by: ['scanId', 'severity'],
+    prisma.cveFinding.findMany({
       where: {
         scanId: { in: scanIds },
         severity: { in: [CveSeverity.CRITICAL, CveSeverity.HIGH] },
       },
-      _count: true,
+      select: { scanId: true, vulnerabilityId: true, severity: true },
+      distinct: ['scanId', 'vulnerabilityId', 'severity'],
     }),
   ]);
 
   const counts = new Map(scanIds.map((id) => [id, { ...NO_COUNTS }]));
   for (const row of charts) counts.get(row.scanId)!.outdatedCharts = row._count;
-  for (const row of cves) {
-    counts.get(row.scanId)![row.severity === CveSeverity.CRITICAL ? 'critical' : 'high'] =
-      row._count;
+  for (const [scanId, scanCounts] of counts) {
+    Object.assign(scanCounts, cveCounts(cves.filter((c) => c.scanId === scanId)));
   }
   return counts;
+}
+
+/** Distinct ids, as `countBySeverity` counts them */
+function cveCounts(cves: { vulnerabilityId: string; severity: CveSeverityValue }[]) {
+  const { CRITICAL = 0, HIGH = 0 } = countBySeverity(cves);
+  return { critical: CRITICAL, high: HIGH };
 }
 
 function toScanDetail(scan: ScanWithFindings): ScanDetail {
   return {
     ...toScanSummary(scan, {
       outdatedCharts: scan.chartFindings.filter((f) => f.status === VersionStatus.OUTDATED).length,
-      critical: scan.cveFindings.filter((f) => f.severity === CveSeverity.CRITICAL).length,
-      high: scan.cveFindings.filter((f) => f.severity === CveSeverity.HIGH).length,
+      ...cveCounts(scan.cveFindings),
     }),
     warnings: JSON.parse(scan.warnings) as string[],
     chartFindings: scan.chartFindings.map((f) => ({

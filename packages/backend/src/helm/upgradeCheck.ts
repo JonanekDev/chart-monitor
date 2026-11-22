@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { parse } from 'yaml';
 import {
-  CveSeverity,
+  severityRank,
   type ChartUpgrade,
   type ManifestChange,
   type VulnerabilityChange,
@@ -108,9 +108,6 @@ export function diffManifests(before: unknown[], after: unknown[]): ManifestChan
   return changes.sort((x, y) => x.resource.localeCompare(y.resource));
 }
 
-// UNKNOWN … CRITICAL, so a higher index is more severe
-const severityRank = (v: VulnerabilityChange) => Object.values(CveSeverity).indexOf(v.severity);
-
 /** CVEs (by id + package, across all of the app's images) only the current or only the upgraded
  * images have. By package rather than image: a chart may swap or rename an image. */
 export function diffVulnerabilities(
@@ -124,6 +121,6 @@ export function diffVulnerabilities(
     [...a]
       .filter(([key]) => !b.has(key))
       .map(([, v]) => v)
-      .sort((x, y) => severityRank(y) - severityRank(x));
+      .sort((x, y) => severityRank(y.severity) - severityRank(x.severity));
   return { fixed: only(before, after), introduced: only(after, before) };
 }

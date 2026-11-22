@@ -41,11 +41,13 @@ const scan = (
   cves: Cve[],
   charts: ScanSnapshot['charts'] = [chart('1.20.4', 'up_to_date')],
   state = 'succeeded',
+  images = [{ image: 'quay.io/cilium/cilium', currentTag: 'v1.20.4' }],
 ): ScanSnapshot => ({
   state,
   errorMessage: state === 'failed' ? 'Could not clone' : null,
   charts,
   cves,
+  images,
 });
 
 describe('buildNotification', () => {
@@ -202,6 +204,87 @@ describe('buildNotification', () => {
   it('ignores CVEs entirely when minSeverity is off', () => {
     const now = scan([cve('CVE-1', 'CRITICAL', '3.0.2')]);
     expect(buildNotification({ ...rules, minSeverity: null }, now, scan([]))).toBeNull();
+  });
+});
+
+describe('vulnerability groups', () => {
+  const harbor = (image: string, id: string, severity: Cve['severity'], fixed = '8.23.0') =>
+    ['curl', 'curl-libs'].map((pkgName) =>
+      cve(id, severity, fixed, { applicationName: 'harbor', image, pkgName }),
+    );
+  const images = (tag: string) => [
+    { image: 'harbor-core', currentTag: 'v2.15.4' },
+    { image: 'harbor-portal', currentTag: tag },
+  ];
+
+  it('counts each id once, under its highest severity, and says why it is new', () => {
+    const now = scan(
+      [
+        ...harbor('harbor-core', 'CVE-1', 'CRITICAL'),
+        ...harbor('harbor-portal', 'CVE-1', 'HIGH'),
+        ...harbor('harbor-portal', 'CVE-2', 'HIGH'),
+      ],
+      undefined,
+      undefined,
+      images('v2.16.0'),
+    );
+    const content = buildNotification(
+      rules,
+      now,
+      scan([], undefined, undefined, images('v2.15.4')),
+    )!;
+
+    // CVE-1 hit the unchanged harbor-core: an advisory, though the upgraded portal has it too
+    expect(content.summary).toBe(
+      'New: 1 critical fixable vulnerability in new advisories for unchanged images, ' +
+        '1 high fixable vulnerability introduced by changes',
+    );
+    expect(content.newVulnerabilities).toHaveLength(6);
+    expect(content.vulnerabilityGroups[0]).toMatchObject({
+      vulnerabilityId: 'CVE-1',
+      severity: 'CRITICAL',
+      packages: ['curl', 'curl-libs'],
+      images: ['harbor-core', 'harbor-portal'],
+      reason: 'advisory',
+      knownElsewhere: false,
+    });
+    const text = toWebhookPayload(content, { repo: 'o/r', scanUrl: null }).text;
+    expect(text).toContain('New advisories for unchanged images: 1 critical');
+    expect(text).toContain('CRITICAL CVE-1 in curl, curl-libs 3.0.1 → 8.23.0 · 2 images (harbor)');
+    expect(text).toContain('Introduced by changes: 1 high');
+  });
+
+  it('lists a known id in a new image without counting it as a new vulnerability', () => {
+    const before = scan(harbor('harbor-core', 'CVE-1', 'HIGH'), undefined, undefined, images('x'));
+    const now = scan(
+      [...harbor('harbor-core', 'CVE-1', 'HIGH'), ...harbor('harbor-portal', 'CVE-1', 'HIGH', '9')],
+      undefined,
+      undefined,
+      images('y'),
+    );
+    const content = buildNotification(rules, now, before)!;
+    expect(content.summary).toBe('New: 1 known vulnerability in new images');
+    const text = toWebhookPayload(content, { repo: 'o/r', scanUrl: null }).text;
+    expect(text).toContain('Introduced by changes: none new');
+    expect(text).toContain('HIGH CVE-1 in curl, curl-libs 3.0.1 → 9 · +1 new image (harbor)');
+  });
+
+  it('notes other versions and sorts by severity, fix, then images affected', () => {
+    const now = scan([
+      cve('CVE-A', 'HIGH', null, { image: 'a' }),
+      cve('CVE-B', 'HIGH', '2', { image: 'a' }),
+      cve('CVE-C', 'HIGH', '2', { image: 'a' }),
+      cve('CVE-C', 'HIGH', '3', { image: 'b', installedVersion: '2.9' }),
+    ]);
+    const content = buildNotification({ ...rules, onlyFixable: false }, now, scan([]))!;
+    expect(content.vulnerabilityGroups.map((g) => g.vulnerabilityId)).toEqual([
+      'CVE-C',
+      'CVE-B',
+      'CVE-A',
+    ]);
+    expect(toWebhookPayload(content, { repo: 'o/r', scanUrl: null }).text).toContain(
+      'CVE-C in openssl 3.0.1 → 2 (+1 other version) · 2 images',
+    );
   });
 });
 
