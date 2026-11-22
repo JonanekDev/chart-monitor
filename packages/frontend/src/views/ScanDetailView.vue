@@ -152,6 +152,24 @@ function vulnerabilitySides(vulns: NonNullable<ChartUpgrade['vulnerabilities']>)
   ].map((side) => ({ ...side, counts: countBySeverity(side.list) }));
 }
 
+/** An outdated image is yours to bump only when its tag isn't simply the chart's default */
+function imageStatus(image: ImageFinding, chart: ChartFindingDetail) {
+  if (image.status !== 'outdated' || image.tagSource !== 'chart') {
+    return { label: image.status, badge: image.status, title: undefined };
+  }
+  return chart.status === 'outdated'
+    ? {
+        label: 'via chart upgrade',
+        badge: 'unknown',
+        title: "The chart's default tag: upgrading the chart brings a newer one",
+      }
+    : {
+        label: 'newer upstream',
+        badge: 'unknown',
+        title: "The chart's default tag: a newer one exists, but the chart doesn't ship it yet",
+      };
+}
+
 const expandedKeys = ref(new Set<string>());
 const expandedImageKeys = ref(new Set<string>());
 
@@ -486,9 +504,47 @@ onUnmounted(() => {
                             <span class="truncate" :title="image.latestTag ?? undefined">{{
                               image.latestTag ?? '—'
                             }}</span>
+                            <div v-if="image.latestTagCheck" class="latest-check">
+                              <template v-if="image.latestTagCheck.result === 'scanned'">
+                                <template
+                                  v-for="side in vulnerabilitySides(image.latestTagCheck)"
+                                  :key="side.label"
+                                >
+                                  <span v-if="side.list.length" class="vuln-side">
+                                    {{ side.label.toLowerCase() }}
+                                    <span
+                                      v-for="severity in SEVERITY_ORDER.filter(
+                                        (s) => side.counts[s],
+                                      )"
+                                      :key="severity"
+                                      :class="['cve-count', severity.toLowerCase()]"
+                                      :title="`${side.counts[severity]} ${severity} severity`"
+                                      >{{ side.counts[severity] }}</span
+                                    >
+                                  </span>
+                                </template>
+                                <span
+                                  v-if="
+                                    !image.latestTagCheck.fixed.length &&
+                                    !image.latestTagCheck.introduced.length
+                                  "
+                                  class="text-muted"
+                                  >same vulnerabilities</span
+                                >
+                              </template>
+                              <span v-else class="text-muted">{{
+                                image.latestTagCheck.result === 'variant_unclear'
+                                  ? 'not scanned (variant unclear)'
+                                  : 'scan failed'
+                              }}</span>
+                            </div>
                           </td>
                           <td>
-                            <span :class="`badge badge-${image.status}`">{{ image.status }}</span>
+                            <span
+                              :class="`badge badge-${imageStatus(image, group.chart).badge}`"
+                              :title="imageStatus(image, group.chart).title"
+                              >{{ imageStatus(image, group.chart).label }}</span
+                            >
                           </td>
                           <td>
                             <span
@@ -732,6 +788,12 @@ progress {
 }
 .changes-summary {
   cursor: pointer;
+}
+.latest-check {
+  margin-top: var(--space-1);
+  font-family: inherit;
+  font-size: 0.8rem;
+  white-space: nowrap;
 }
 .vendor-advisory {
   color: var(--color-text-muted);

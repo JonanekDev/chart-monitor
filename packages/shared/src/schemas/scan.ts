@@ -67,6 +67,20 @@ export const chartFindingDetailSchema = chartFindingSchema.extend({
 
 export type ChartFindingDetail = z.infer<typeof chartFindingDetailSchema>;
 
+/** Vulnerabilities of the latest tag compared to the current one */
+export const latestTagCheckSchema = z.discriminatedUnion('result', [
+  z.object({
+    result: z.literal('scanned'),
+    fixed: z.array(vulnerabilityChangeSchema),
+    introduced: z.array(vulnerabilityChangeSchema),
+  }),
+  /** Not a sure upgrade candidate (another variant suffix or a pre-release), so not scanned */
+  z.object({ result: z.literal('variant_unclear') }),
+  z.object({ result: z.literal('scan_failed') }),
+]);
+
+export type LatestTagCheck = z.infer<typeof latestTagCheckSchema>;
+
 export const imageFindingSchema = z.object({
   applicationName: z.string(),
   image: z.string(),
@@ -76,6 +90,11 @@ export const imageFindingSchema = z.object({
   note: z.string().nullable(),
   /** False while the vulnerability scan of this image is still pending */
   vulnerabilitiesScanned: z.boolean(),
+  /** Outdated images only: whether the tag is the chart's default or set in the app's values.
+   * null when undetermined */
+  tagSource: z.enum(['values', 'chart']).nullable(),
+  /** Outdated images whose newer tag doesn't come with a chart upgrade; null otherwise */
+  latestTagCheck: latestTagCheckSchema.nullable(),
 });
 
 export type ImageFinding = z.infer<typeof imageFindingSchema>;

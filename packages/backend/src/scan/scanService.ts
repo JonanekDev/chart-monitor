@@ -5,6 +5,8 @@ import {
   ScanState,
   VersionStatus,
   type ChartUpgrade,
+  type ImageFinding,
+  type LatestTagCheck,
   type ScanCounts,
   type ScanDetail,
   type ScanPhaseValue,
@@ -103,6 +105,8 @@ function toScanDetail(scan: ScanWithFindings): ScanDetail {
       status: f.status,
       note: f.note,
       vulnerabilitiesScanned: f.vulnerabilitiesScanned,
+      tagSource: f.tagSource as ImageFinding['tagSource'],
+      latestTagCheck: f.latestTagCheck ? (JSON.parse(f.latestTagCheck) as LatestTagCheck) : null,
     })),
     cveFindings: scan.cveFindings.map((f) => ({
       applicationName: f.applicationName,
@@ -139,7 +143,18 @@ function databaseReporter(prisma: PrismaClient, scanId: string): ScanReporter {
         data: { upgrade: JSON.stringify(upgrade) },
       }),
     imageFindings: (findings) =>
-      prisma.imageFinding.createMany({ data: findings.map((f) => ({ ...f, scanId })) }),
+      prisma.imageFinding.createMany({
+        data: findings.map((f) => ({
+          ...f,
+          latestTagCheck: f.latestTagCheck && JSON.stringify(f.latestTagCheck),
+          scanId,
+        })),
+      }),
+    latestTagChecked: ({ applicationName, repository, tag }, check) =>
+      prisma.imageFinding.updateMany({
+        where: { scanId, applicationName, image: repository, currentTag: tag },
+        data: { latestTagCheck: JSON.stringify(check) },
+      }),
     imageScanned: ({ repository, tag }, cves) =>
       prisma.$transaction([
         prisma.cveFinding.createMany({ data: cves.map((c) => ({ ...c, scanId })) }),

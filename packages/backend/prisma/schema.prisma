@@ -119,6 +119,10 @@ model ImageFinding {
   status                 VersionStatus
   note                   String?
   vulnerabilitiesScanned Boolean       @default(false)
+  /// values | chart; outdated images only
+  tagSource              String?
+  /// JSON LatestTagCheck
+  latestTagCheck         String?
 
   @@index([scanId])
 }

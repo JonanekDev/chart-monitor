@@ -5,19 +5,20 @@ import {
   type ChartUpgrade,
   type CveFinding,
   type ImageFinding,
+  type LatestTagCheck,
   type ScanPhaseValue,
   type VulnerabilityChange,
 } from '@chart-monitor/shared';
 import { resolveApplicationSets } from '../argocd/findApplicationSets.js';
 import { withWarningPrefix, type ApplicationSource, type ScanContext } from '../argocd/types.js';
 import { fetchChartVersions, normalizeChartRepoUrl } from '../helm/chartVersions.js';
-import { compareVersions, findLatestVersion } from '../helm/versionCompare.js';
+import { compareVersions, findLatestVersion, isSureUpgrade } from '../helm/versionCompare.js';
 import { findImages, renderChart, showChartValues } from '../helm/renderChart.js';
 import { diffManifests, diffVulnerabilities, removedValueKeys } from '../helm/upgradeCheck.js';
 import { collectValuesDocuments } from '../argocd/valueFiles.js';
 import { expandUmbrellaChart, type ChartToScan } from '../argocd/umbrellaChart.js';
 import { createRepoOpener } from '../git/repoSnapshot.js';
-import { fetchImageTags } from '../registry/imageRef.js';
+import { fetchImageTags, parseImageRef } from '../registry/imageRef.js';
 import { scanImageForVulnerabilities, type ImageVulnerability } from '../trivy/scanImage.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
 import { env } from '../config/env.js';
@@ -76,9 +77,76 @@ async function resolveImageFindings(
         status: latestTag ? compareVersions(currentTag, latestTag) : VersionStatus.UNKNOWN,
         note: latestTag ? null : 'Tag is not semver, or the registry does not expose a tag list',
         vulnerabilitiesScanned: false,
+        tagSource: null,
+        latestTagCheck: null,
       };
     }),
   );
+}
+
+/** Images the chart renders without the app's values (null when it can't: required values) */
+async function chartDefaultImages(job: ChartJob, images: string[]): Promise<string[] | null> {
+  const parameters = job.source.helm?.parameters ?? [];
+  if (job.valuesDocuments.length === 0 && parameters.length === 0) return images;
+  const withoutValues = { ...job.source, helm: { ...job.source.helm, parameters: [] } };
+  return renderChart(withoutValues).then(findImages, () => null);
+}
+
+/** Repository path + tag without the registry, so a mirror or global.imageRegistry doesn't count
+ * as a different image */
+function repoAndTag(image: string): { repo: string; tag: string } | null {
+  const parsed = parseImageRef(image);
+  return parsed && { repo: parsed.repoPath, tag: parsed.tag };
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function tagSourceOf(
+  image: string,
+  defaults: string[],
+  valuesDocuments: string[],
+): ImageFinding['tagSource'] {
+  const own = repoAndTag(image);
+  if (!own) return null;
+  const sameRepo = defaults.map(repoAndTag).filter((d) => d?.repo === own.repo);
+  if (sameRepo.length) return sameRepo.some((d) => d!.tag === own.tag) ? 'chart' : 'values';
+  // Not rendered without values at all (a component the values turn on, a repository they
+  // change): the tag is yours if it's written in them, as a whole word
+  const tag = new RegExp(`(^|[^\\w.-])${escapeRegExp(own.tag)}($|[^\\w.-])`);
+  return valuesDocuments.some((doc) => tag.test(doc)) ? 'values' : 'chart';
+}
+
+interface LatestTagScan {
+  finding: ImageFinding;
+  /** As rendered, and the latest tag of the same repository */
+  ref: string;
+  latestRef: string;
+}
+
+/** Fills in tagSource of outdated images, and picks the ones whose latest tag is worth scanning:
+ * not when a chart upgrade brings the newer tag (the upgrade comparison covers it), and only when
+ * the latest tag is surely the same image variant */
+export async function classifyOutdatedImages(
+  job: ChartJob,
+  chartOutdated: boolean,
+  images: string[],
+  findings: ImageFinding[],
+): Promise<LatestTagScan[]> {
+  if (!findings.some((f) => f.status === VersionStatus.OUTDATED)) return [];
+  const defaults = await chartDefaultImages(job, images);
+  const scans: LatestTagScan[] = [];
+  findings.forEach((finding, i) => {
+    if (finding.status !== VersionStatus.OUTDATED || !finding.latestTag) return;
+    const ref = images[i]!;
+    finding.tagSource = defaults && tagSourceOf(ref, defaults, job.valuesDocuments);
+    if (finding.tagSource === 'chart' && chartOutdated) return;
+    if (isSureUpgrade(finding.currentTag, finding.latestTag)) {
+      scans.push({ finding, ref, latestRef: `${finding.image}:${finding.latestTag}` });
+    } else {
+      finding.latestTagCheck = { result: 'variant_unclear' };
+    }
+  });
+  return scans;
 }
 
 function splitImageTag(image: string): [string, string?] {
@@ -181,6 +249,11 @@ export interface ScanReporter {
     upgrade: ChartUpgrade,
   ): Promise<unknown>;
   imageFindings(findings: ImageFinding[]): Promise<unknown>;
+  /** The latest tag of an outdated image was compared with its current one */
+  latestTagChecked(
+    image: { applicationName: string; repository: string; tag: string },
+    check: LatestTagCheck,
+  ): Promise<unknown>;
   /** The vulnerability scan of one image finished (`cves` may be empty) */
   imageScanned(image: { repository: string; tag: string }, cves: CveFinding[]): Promise<unknown>;
   /** All warnings so far (deduplicated, in discovery order) */
@@ -254,16 +327,26 @@ export async function executeScan(
     });
 
     await reporter.phase(ScanPhase.IMAGES, jobs.length);
-    const appImages = await mapWithConcurrency(jobs, CHART_CONCURRENCY, async (job) => {
-      const manifests = await renderChart(job.source, job.valuesDocuments).catch((error) => {
-        job.ctx.warn(`images could not be determined: ${describeError(error)}`);
-        return null;
-      });
-      const images = findImages(manifests ?? []);
-      await reporter.imageFindings(await resolveImageFindings(job.applicationName, images));
-      await reporter.step(`${job.applicationName} (${job.source.chart})`);
-      return { applicationName: job.applicationName, images, manifests };
-    });
+    const imageJobs = jobs.map((job, i) => ({
+      job,
+      chartOutdated: chartFindings[i]!.status === VersionStatus.OUTDATED,
+    }));
+    const appImages = await mapWithConcurrency(
+      imageJobs,
+      CHART_CONCURRENCY,
+      async ({ job, chartOutdated }) => {
+        const manifests = await renderChart(job.source, job.valuesDocuments).catch((error) => {
+          job.ctx.warn(`images could not be determined: ${describeError(error)}`);
+          return null;
+        });
+        const images = findImages(manifests ?? []);
+        const findings = await resolveImageFindings(job.applicationName, images);
+        const latestTagScans = await classifyOutdatedImages(job, chartOutdated, images, findings);
+        await reporter.imageFindings(findings);
+        await reporter.step(`${job.applicationName} (${job.source.chart})`);
+        return { applicationName: job.applicationName, images, manifests, latestTagScans };
+      },
+    );
     await flushWarnings();
 
     const upgrades = jobs.flatMap((job, i) => {
@@ -294,7 +377,11 @@ export async function executeScan(
     // upgraded chart) use it
     const currentImages = new Set(appImages.flatMap((a) => a.images));
     const uniqueImages = [
-      ...new Set([...currentImages, ...checked.flatMap((c) => c?.latestImages ?? [])]),
+      ...new Set([
+        ...currentImages,
+        ...checked.flatMap((c) => c?.latestImages ?? []),
+        ...appImages.flatMap((a) => a.latestTagScans.map((t) => t.latestRef)),
+      ]),
     ];
     const scanned = new Map<string, ImageVulnerability[] | null>();
     await reporter.phase(ScanPhase.VULNERABILITIES, uniqueImages.length);
@@ -329,6 +416,19 @@ export async function executeScan(
         ...result.upgrade,
         vulnerabilities: diffVulnerabilities(current, latest),
       });
+    }
+
+    for (const { applicationName, latestTagScans } of appImages) {
+      for (const { finding, ref, latestRef } of latestTagScans) {
+        const current = vulnerabilitiesOf([ref], scanned);
+        const latest = vulnerabilitiesOf([latestRef], scanned);
+        await reporter.latestTagChecked(
+          { applicationName, repository: finding.image, tag: finding.currentTag },
+          current && latest
+            ? { result: 'scanned', ...diffVulnerabilities(current, latest) }
+            : { result: 'scan_failed' },
+        );
+      }
     }
   } finally {
     // Also on failure: partial results stay, so should the warnings that explain gaps in them

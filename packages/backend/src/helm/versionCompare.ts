@@ -45,3 +45,15 @@ export function compareVersions(current: string, latest: string | null): Version
     ? VersionStatus.UP_TO_DATE
     : VersionStatus.OUTDATED;
 }
+
+// Everything after the version: `13.3.0-distroless` → `distroless`, `v2.16.0` → ''
+const variantOf = (tag: string) => tag.replace(/^v?\d+(\.\d+)*/, '').replace(/^[-+_.]/, '');
+const PRERELEASE = /(^|[-.])(alpha|beta|rc|pre|preview|dev|snapshot|nightly)\d*([-.]|$)/i;
+
+/** The newer tag is surely the same image, just newer: same variant suffix (distroless, alpine…,
+ * or none on both) and not a pre-release. Anything else is left alone until variants are told
+ * apart properly. */
+export function isSureUpgrade(currentTag: string, latestTag: string): boolean {
+  const variant = variantOf(latestTag);
+  return variant === variantOf(currentTag) && !PRERELEASE.test(variant);
+}

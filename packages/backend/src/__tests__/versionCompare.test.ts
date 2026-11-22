@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { VersionStatus } from '@chart-monitor/shared';
-import { compareVersions, findLatestVersion } from '../helm/versionCompare.js';
+import { compareVersions, findLatestVersion, isSureUpgrade } from '../helm/versionCompare.js';
 
 describe('findLatestVersion', () => {
   it('picks the highest semver version', () => {
@@ -48,5 +48,17 @@ describe('compareVersions', () => {
 
   it('is outdated when a newer version exists', () => {
     expect(compareVersions('1.0.0', '1.1.0')).toBe(VersionStatus.OUTDATED);
+  });
+});
+
+describe('isSureUpgrade', () => {
+  it('accepts the same variant, rejects other variants and pre-releases', () => {
+    expect(isSureUpgrade('v2.15.4', 'v2.16.0')).toBe(true);
+    expect(isSureUpgrade('13.3.0-distroless', '13.3.1-distroless')).toBe(true);
+    expect(isSureUpgrade('13.3.0-distroless', '13.3.1')).toBe(false);
+    expect(isSureUpgrade('8.2.3-alpine', '8.12-rc2')).toBe(false);
+    expect(isSureUpgrade('1.2.0', '1.3.0-rc.1')).toBe(false);
+    expect(isSureUpgrade('v1.39.5-1792733054-8c73b28', 'v1.40-2b268f0')).toBe(false);
+    expect(isSureUpgrade('latest', '7.2')).toBe(false);
   });
 });

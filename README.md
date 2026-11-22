@@ -4,7 +4,8 @@ Add a GitOps repo as a monitor and it is scanned on a schedule (or on demand): t
 ArgoCD `Application`s and `ApplicationSet`s, then checks every Helm chart they deploy:
 
 - is there a newer chart version?
-- are there newer tags for the images the chart renders (with the app's own values)?
+- are there newer tags for the images the chart renders (with the app's own values)? Is the tag
+  yours to bump, or the chart's default that comes with a chart upgrade? What would the newer tag fix?
 - what vulnerabilities do those images have (Trivy)?
 - what would upgrading an outdated chart change: vulnerabilities it fixes and brings in, values the
   new version no longer has, a failing render, immutable fields that make the sync fail?
