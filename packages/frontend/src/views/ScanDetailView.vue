@@ -9,6 +9,7 @@ import {
   type CveFinding,
   type CveSeverityValue,
   type ImageFinding,
+  type ManifestChange,
   type ScanDetail,
   type ScanPhaseValue,
   type SeverityCounts,
@@ -129,9 +130,12 @@ function upgradeRisky({ upgrade }: ChartFindingDetail): boolean {
     !!upgrade &&
     (!!upgrade.renderError ||
       upgrade.removedValues.length > 0 ||
-      upgrade.manifestChanges.some((c) => c.immutableFields.length > 0))
+      upgrade.manifestChanges.some((c) => c.immutableFields.length > 0 || rbacFields(c).length))
   );
 }
+
+// Upgrades stored before RBAC changes were tracked don't have the field
+const rbacFields = (change: ManifestChange) => change.rbacFields ?? [];
 
 const addedOrRemoved = ({ manifestChanges }: ChartUpgrade) =>
   manifestChanges.filter((c) => c.change !== 'changed');
@@ -342,13 +346,30 @@ onUnmounted(() => {
                       (c) => c.immutableFields.length,
                     )"
                     :key="change.resource"
-                    class="immutable"
+                    class="upgrade-risk"
                   >
                     <Icon icon="lucide:alert-triangle" />
                     <span>
                       <span class="mono">{{ change.resource }}</span>: immutable
                       {{ change.immutableFields.join(', ') }} changes, the sync fails until the
                       resource is deleted and recreated
+                    </span>
+                  </p>
+                  <p
+                    v-for="change in group.chart.upgrade.manifestChanges.filter(
+                      (c) => rbacFields(c).length,
+                    )"
+                    :key="`rbac-${change.resource}`"
+                    class="upgrade-risk"
+                  >
+                    <Icon icon="lucide:shield-alert" />
+                    <span v-if="change.change === 'added'">
+                      <span class="mono">{{ change.resource }}</span>: new, review the permissions
+                      it grants
+                    </span>
+                    <span v-else>
+                      <span class="mono">{{ change.resource }}</span>: RBAC
+                      {{ rbacFields(change).join(', ') }} change, review the permissions
                     </span>
                   </p>
                   <details v-if="addedOrRemoved(group.chart.upgrade).length">
@@ -823,7 +844,7 @@ progress {
 .change-badge.removed {
   color: #ef4444;
 }
-.immutable {
+.upgrade-risk {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);

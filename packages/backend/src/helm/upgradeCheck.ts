@@ -78,9 +78,27 @@ const IMMUTABLE_FIELDS: Record<string, string[]> = {
   ],
 };
 
-/** Resources the new version adds or removes, plus those whose immutable fields change. Other
- * changes are left out: mostly version bumps and chart internals, and ArgoCD shows the full diff
- * at sync time anyway. */
+// What a Role grants and whom a Binding grants it to
+const RBAC_FIELDS: Record<string, string[]> = {
+  Role: ['rules'],
+  ClusterRole: ['rules', 'aggregationRule'],
+  RoleBinding: ['subjects', 'roleRef'],
+  ClusterRoleBinding: ['subjects', 'roleRef'],
+};
+
+/** Order-independent form: reordered rules, verbs or subjects grant the same */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).sort().join(',')}]`;
+  if (isObject(value)) {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'undefined';
+}
+
+/** Resources the new version adds or removes, plus those whose immutable or RBAC fields change.
+ * Other changes are left out: mostly version bumps and chart internals, and ArgoCD shows the full
+ * diff at sync time anyway. */
 export function diffManifests(before: unknown[], after: unknown[]): ManifestChange[] {
   const index = (manifests: unknown[]) =>
     new Map(
@@ -96,14 +114,20 @@ export function diffManifests(before: unknown[], after: unknown[]): ManifestChan
   const changes: ManifestChange[] = [];
   for (const resource of new Set([...old.keys(), ...next.keys()])) {
     const [a, b] = [old.get(resource), next.get(resource)];
+    const rbac = RBAC_FIELDS[String((a ?? b)!.kind)] ?? [];
     if (!a || !b) {
-      changes.push({ resource, change: a ? 'removed' : 'added', immutableFields: [] });
+      // A new Role or Binding grants something; a removed one only takes away
+      const rbacFields = b ? rbac.filter((field) => b[field] !== undefined) : [];
+      changes.push({ resource, change: a ? 'removed' : 'added', immutableFields: [], rbacFields });
       continue;
     }
     const immutableFields = (IMMUTABLE_FIELDS[String(a.kind)] ?? []).filter(
       (path) => !isDeepStrictEqual(at(a, path), at(b, path)),
     );
-    if (immutableFields.length) changes.push({ resource, change: 'changed', immutableFields });
+    const rbacFields = rbac.filter((field) => canonical(a[field]) !== canonical(b[field]));
+    if (immutableFields.length || rbacFields.length) {
+      changes.push({ resource, change: 'changed', immutableFields, rbacFields });
+    }
   }
   return changes.sort((x, y) => x.resource.localeCompare(y.resource));
 }

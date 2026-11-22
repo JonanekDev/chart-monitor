@@ -144,6 +144,37 @@ describe('buildNotification', () => {
     expect(buildNotification(rules, risky, before)!.chartUpdates[0]?.warnings).toEqual([
       'values no longer in the chart: a.b',
     ]);
+    const rbac = scan(
+      [],
+      [
+        {
+          ...chart('1.20.5'),
+          upgrade: {
+            removedValues: [],
+            manifestChanges: [
+              {
+                resource: 'ClusterRole op',
+                change: 'changed',
+                immutableFields: [],
+                rbacFields: ['rules'],
+              },
+              {
+                resource: 'RoleBinding ops/ci',
+                change: 'added',
+                immutableFields: [],
+                rbacFields: ['subjects', 'roleRef'],
+              },
+            ],
+            renderError: null,
+            vulnerabilities: null,
+          },
+        },
+      ],
+    );
+    expect(buildNotification(rules, rbac, before)!.chartUpdates[0]?.warnings).toEqual([
+      'ClusterRole op: RBAC rules change, review the permissions',
+      'RoleBinding ops/ci: new, review the permissions it grants',
+    ]);
     expect(buildNotification(rules, scan([], [chart('1.21.0')]), now)!.summary).toBe(
       'New: 1 chart update',
     );

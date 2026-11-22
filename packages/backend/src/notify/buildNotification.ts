@@ -139,6 +139,13 @@ function upgradeWarnings(upgrade: ChartUpgrade | null | undefined): string[] {
       `${change.resource}: immutable ${change.immutableFields.join(', ')} changes, sync fails until it is replaced`,
     );
   }
+  for (const change of upgrade.manifestChanges.filter((c) => c.rbacFields?.length)) {
+    warnings.push(
+      change.change === 'added'
+        ? `${change.resource}: new, review the permissions it grants`
+        : `${change.resource}: RBAC ${change.rbacFields.join(', ')} change, review the permissions`,
+    );
+  }
   return warnings;
 }
 

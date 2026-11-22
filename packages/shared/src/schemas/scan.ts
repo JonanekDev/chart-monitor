@@ -22,10 +22,13 @@ export type ChartFinding = z.infer<typeof chartFindingSchema>;
 export const manifestChangeSchema = z.object({
   /** e.g. `Deployment monitoring/grafana` */
   resource: z.string(),
-  /** `changed` only when immutable fields change */
+  /** `changed` only when immutable or RBAC fields change */
   change: z.enum(['added', 'removed', 'changed']),
   /** The sync fails until the resource is replaced */
   immutableFields: z.array(z.string()),
+  /** RBAC fields that grant permissions and change, or that an added Role/Binding has: worth a
+   * review. Missing in upgrades stored before this existed */
+  rbacFields: z.array(z.string()),
 });
 
 export type ManifestChange = z.infer<typeof manifestChangeSchema>;
