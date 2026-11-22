@@ -95,11 +95,13 @@ registries with short-lived tokens (ECR, GCR/Artifact Registry, ACR) aren't supp
 login (or a 404 from a host we have a login for, which may mean missing permissions) shows up as a
 warning on the scan, and logins never appear in warnings or errors.
 
-**Notifications:** add a Discord or JSON webhook channel under Settings (gear icon), then pick it in a
-monitor along with what to report: new vulnerabilities from a chosen severity (optionally only ones
-with a fix), new chart versions (all of them, or only those whose upgrade fixes vulnerabilities from
-that severity up) and failed scans. The first scan sends an overview, later scans only
-what is new since the previous one.
+**Notifications:** add a Discord, Slack (incoming webhook) or JSON webhook channel under Settings
+(gear icon), then pick it in a monitor along with what to report: new vulnerabilities from a chosen
+severity (optionally only ones with a fix), new chart versions (all of them, or only those whose
+upgrade fixes vulnerabilities from that severity up) and failed scans. The first scan sends an
+overview, later scans only what is new since the previous one. The JSON webhook gets all the data
+plus a plain-text `text`, for n8n, Zapier, Home Assistant or your own script; services that expect
+their own format (Teams, ntfy, Gotify) need one of those in between.
 
 **Internal CA:** if your git server or Helm repo uses a certificate from a private CA, uncomment the
 `EXTRA_CA_CERTS` lines in `docker-compose.yml` and mount the CA file there.

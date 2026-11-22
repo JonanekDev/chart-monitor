@@ -128,7 +128,26 @@ export function toDiscordPayload(content: NotificationContent, ctx: Notification
   };
 }
 
-/** Plain JSON for ntfy, Gotify, n8n, scripts…: the full data plus a readable `text` */
+// Slack's mrkdwn needs these three escaped; it also keeps repo-controlled text (CVE titles, error
+// messages) from forming <!channel>-style pings or links
+const escapeSlack = (text: string) =>
+  text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+
+/** A Slack incoming webhook message: the summary linked to the scan, then the most severe items */
+export function toSlackPayload(content: NotificationContent, ctx: NotificationContext) {
+  const repo = escapeSlack(ctx.repo);
+  const title = ctx.scanUrl ? `<${ctx.scanUrl}|${repo}>` : repo;
+  let body = escapeSlack(lines(content).join('\n')).replace(/\*\*(.+?)\*\*/g, '*$1*');
+  if (body.length > MAX_DESCRIPTION) body = `${body.slice(0, MAX_DESCRIPTION)}…`;
+  return {
+    text: `*${title}*: ${escapeSlack(content.summary)}${body ? `\n${body}` : ''}`,
+    // GitHub release and advisory links would each expand into a preview
+    unfurl_links: false,
+    unfurl_media: false,
+  };
+}
+
+/** Plain JSON for n8n, Zapier, Home Assistant, scripts…: the full data plus a readable `text` */
 export function toWebhookPayload(content: NotificationContent, ctx: NotificationContext) {
   return {
     source: 'chart-monitor',

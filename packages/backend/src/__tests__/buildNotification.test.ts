@@ -4,7 +4,7 @@ import {
   type NotifyRules,
   type ScanSnapshot,
 } from '../notify/buildNotification.js';
-import { toDiscordPayload, toWebhookPayload } from '../notify/format.js';
+import { toDiscordPayload, toSlackPayload, toWebhookPayload } from '../notify/format.js';
 
 const rules: NotifyRules = {
   minSeverity: 'HIGH',
@@ -389,6 +389,24 @@ describe('payloads', () => {
       color: 0xef4444,
     });
     expect(payload.embeds[0]!.description).toContain('…and 290 more');
+  });
+
+  it('builds a Slack message that cannot ping anyone or inject links', () => {
+    const tricky = buildNotification(
+      { ...rules, onlyFixable: false },
+      scan([cve('CVE-1', 'CRITICAL', null, { title: '<!channel> <https://evil|click> & co' })]),
+      scan([]),
+    )!;
+    // Titles aren't in the text, so check the escaping on the repo label and the summary path too
+    const payload = toSlackPayload(tricky, { repo: 'org/<!here>', scanUrl: ctx.scanUrl });
+    expect(payload.text).not.toMatch(/<!(channel|here)>/);
+    expect(payload.text.startsWith(`*<${ctx.scanUrl}|org/&lt;!here&gt;>*: New: 1 critical`)).toBe(
+      true,
+    );
+    expect(payload.text).toContain('• *CRITICAL* CVE-1 in openssl');
+    expect(payload.text).not.toContain('**');
+    expect(payload).toMatchObject({ unfurl_links: false, unfurl_media: false });
+    expect(toSlackPayload(content, ctx).text.length).toBeLessThanOrEqual(4000);
   });
 
   it('builds a generic webhook body with full data and plain text', () => {

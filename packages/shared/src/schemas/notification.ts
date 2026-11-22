@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
-export const ChannelType = { DISCORD: 'discord', WEBHOOK: 'webhook' } as const;
-export const channelTypeSchema = z.enum([ChannelType.DISCORD, ChannelType.WEBHOOK]);
+export const ChannelType = { DISCORD: 'discord', SLACK: 'slack', WEBHOOK: 'webhook' } as const;
+export const channelTypeSchema = z.enum([
+  ChannelType.DISCORD,
+  ChannelType.SLACK,
+  ChannelType.WEBHOOK,
+]);
 export type ChannelTypeValue = z.infer<typeof channelTypeSchema>;
 
 const webhookUrl = z

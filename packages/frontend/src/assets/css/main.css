@@ -76,6 +76,8 @@ main.container {
 
 .btn-primary:hover {
   background-color: var(--color-primary-hover);
+  /* A link styled as a button would otherwise get a:hover's color, the same as this background */
+  color: var(--color-on-primary);
   transform: translateY(-2px);
 }
 

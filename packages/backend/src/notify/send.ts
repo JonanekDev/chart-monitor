@@ -1,6 +1,11 @@
 import type { ChannelTypeValue } from '@chart-monitor/shared';
 import type { NotificationContent } from './buildNotification.js';
-import { toDiscordPayload, toWebhookPayload, type NotificationContext } from './format.js';
+import {
+  toDiscordPayload,
+  toSlackPayload,
+  toWebhookPayload,
+  type NotificationContext,
+} from './format.js';
 
 const TIMEOUT_MS = 10_000;
 
@@ -10,7 +15,11 @@ export async function sendNotification(
   ctx: NotificationContext,
 ): Promise<void> {
   const payload =
-    channel.type === 'discord' ? toDiscordPayload(content, ctx) : toWebhookPayload(content, ctx);
+    channel.type === 'discord'
+      ? toDiscordPayload(content, ctx)
+      : channel.type === 'slack'
+        ? toSlackPayload(content, ctx)
+        : toWebhookPayload(content, ctx);
   const response = await fetch(channel.url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

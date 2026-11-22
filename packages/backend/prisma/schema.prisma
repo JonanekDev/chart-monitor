@@ -56,7 +56,7 @@ model Monitor {
 model NotificationChannel {
   id        String    @id @default(uuid())
   name      String
-  /// discord | webhook
+  /// discord | slack | webhook
   type      String
   /// Secret: anyone with it can post to the channel
   url       String

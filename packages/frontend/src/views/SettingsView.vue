@@ -24,6 +24,7 @@ const isSaving = ref(false);
 
 const TYPE_LABEL: Record<ChannelTypeValue, string> = {
   discord: 'Discord',
+  slack: 'Slack',
   webhook: 'Webhook (JSON)',
 };
 
@@ -164,7 +165,9 @@ async function onDelete(channel: Channel) {
           :placeholder="
             type === 'discord'
               ? 'https://discord.com/api/webhooks/…'
-              : 'https://ntfy.example.com/topic, n8n, …'
+              : type === 'slack'
+                ? 'https://hooks.slack.com/services/…'
+                : 'https://n8n.example.com/webhook/…'
           "
           required
         />
@@ -172,8 +175,13 @@ async function onDelete(channel: Channel) {
           <template v-if="type === 'discord'">
             Discord: channel settings → Integrations → Webhooks → New webhook → Copy URL.
           </template>
+          <template v-else-if="type === 'slack'">
+            Slack: create an app at api.slack.com/apps → Incoming Webhooks → Add New Webhook to
+            Workspace → pick the channel → copy the URL.
+          </template>
           <template v-else
-            >Receives a JSON POST with the findings and a plain-text summary.</template
+            >Receives a JSON POST with the findings and a plain-text summary, for n8n, Zapier, Home
+            Assistant or your own script.</template
           >
           The URL is a secret, so it is not shown again after saving.
         </p>
