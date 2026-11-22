@@ -22,8 +22,15 @@ export type ChartFinding = z.infer<typeof chartFindingSchema>;
 export const manifestChangeSchema = z.object({
   /** e.g. `Deployment monitoring/grafana` */
   resource: z.string(),
-  /** `changed` only when immutable or RBAC fields change */
   change: z.enum(['added', 'removed', 'changed']),
+  /** What changes, with version bumps and other noise left out (see diffManifests). `before` and
+   * `after` are JSON, null when the field is missing on that side */
+  fields: z.array(
+    z.object({ path: z.string(), before: z.string().nullable(), after: z.string().nullable() }),
+  ),
+  /** Changed fields not listed: CRD schemas (only counted) and anything over the per-resource
+   * limit */
+  fieldsNotListed: z.number().int(),
   /** The sync fails until the resource is replaced */
   immutableFields: z.array(z.string()),
   /** RBAC fields that grant permissions and change, or that an added Role/Binding has: worth a

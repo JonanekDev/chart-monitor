@@ -157,12 +157,16 @@ describe('buildNotification', () => {
               {
                 resource: 'ClusterRole op',
                 change: 'changed',
+                fields: [],
+                fieldsNotListed: 0,
                 immutableFields: [],
                 rbacFields: ['rules'],
               },
               {
                 resource: 'RoleBinding ops/ci',
                 change: 'added',
+                fields: [],
+                fieldsNotListed: 0,
                 immutableFields: [],
                 rbacFields: ['subjects', 'roleRef'],
               },

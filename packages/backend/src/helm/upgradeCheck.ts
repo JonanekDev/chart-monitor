@@ -89,6 +89,114 @@ const IMMUTABLE_FIELDS: Record<string, string[]> = {
   ],
 };
 
+// Change with every chart version (or every render) without changing what gets deployed
+const NOISY_METADATA = [
+  'helm.sh/chart',
+  'app.kubernetes.io/version',
+  'controller-gen.kubebuilder.io/version',
+];
+
+// Versions and digests in any string (image tags, `chart: name-1.2.3` labels, `--image=…:v1.2`
+// args) are masked: bumping them is what an upgrade does, and the image table already shows them.
+// ponytail: also hides a changed plain decimal string like "1.5"; IPs are left alone
+const VERSION = /(?<![\w.])v?\d+\.\d+(?:\.\d+)?(?![.\d])(?:[-+][\w.-]+)?/g;
+const DIGEST = /@sha256:[0-9a-f]{64}/g;
+const maskVersions = (text: string) => text.replace(DIGEST, '').replace(VERSION, '<version>');
+
+function dropNoise(node: unknown): void {
+  if (Array.isArray(node)) {
+    node.forEach((item, i) => {
+      if (typeof item === 'string') node[i] = maskVersions(item);
+      else dropNoise(item);
+    });
+    return;
+  }
+  if (!isObject(node)) return;
+  for (const [key, value] of Object.entries(node)) {
+    if ((key === 'labels' || key === 'annotations') && isObject(value)) {
+      for (const name of Object.keys(value)) {
+        if (NOISY_METADATA.includes(name) || name.startsWith('checksum/')) delete value[name];
+      }
+    }
+    // Generated certificates (genCA) differ on every render
+    if (key === 'caBundle') node[key] = '';
+    else if (typeof value === 'string') node[key] = maskVersions(value);
+    else dropNoise(value);
+  }
+}
+
+function normalize(manifest: Obj): Obj {
+  const copy = structuredClone(manifest);
+  dropNoise(copy);
+  // Secret values are random (randAlphaNum) or sensitive: only compare which keys there are
+  if (copy.kind === 'Secret') {
+    for (const field of ['data', 'stringData']) {
+      const data = copy[field];
+      if (isObject(data)) for (const key of Object.keys(data)) data[key] = '***';
+    }
+  }
+  return copy;
+}
+
+type Fields = ManifestChange['fields'];
+
+const MAX_VALUE_LENGTH = 300;
+const show = (value: unknown): string | null =>
+  value === undefined ? null : JSON.stringify(value).slice(0, MAX_VALUE_LENGTH);
+
+function keyed(list: unknown[], byName: boolean): Map<string, unknown> {
+  return new Map(
+    list.map((item, i) => [byName ? ((item as Obj).name as string) : String(i), item]),
+  );
+}
+
+const isNamed = (list: unknown[]) =>
+  list.every((item) => isObject(item) && typeof item.name === 'string');
+
+/** Entries only one side has, ignoring order: `path[]` with null before (added) or after (removed) */
+function diffUnordered(before: unknown[], after: unknown[], path: string, out: Fields): void {
+  const remaining = [...after];
+  for (const item of before) {
+    const i = remaining.findIndex((other) => isDeepStrictEqual(other, item));
+    if (i >= 0) remaining.splice(i, 1);
+    else out.push({ path: `${path}[]`, before: show(item), after: null });
+  }
+  for (const item of remaining) out.push({ path: `${path}[]`, before: null, after: show(item) });
+}
+
+function diffFields(before: unknown, after: unknown, path: string, out: Fields): void {
+  if (isDeepStrictEqual(before, after)) return;
+
+  if (Array.isArray(before) && Array.isArray(after)) {
+    // ponytail: a pure reorder counts as no change (rules, tolerations); the rare list whose order
+    // matters (args) then hides a reorder
+    if (canonical(before) === canonical(after)) return;
+    // Lists like containers, env, ports and volumes are matched by name. Other lists by position
+    // only while their length stays (rules, items edited in place); otherwise one inserted entry
+    // (an extra arg or toleration) would shift and "change" every entry after it.
+    const byName = isNamed(before) && isNamed(after);
+    if (!byName && (before.length !== after.length || !before.every(isObject))) {
+      return diffUnordered(before, after, path, out);
+    }
+    const [a, b] = [keyed(before, byName), keyed(after, byName)];
+    for (const key of new Set([...a.keys(), ...b.keys()])) {
+      diffFields(a.get(key), b.get(key), `${path}[${key}]`, out);
+    }
+    return;
+  }
+  if (isObject(before) && isObject(after)) {
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      diffFields(before[key], after[key], path ? `${path}.${key}` : key, out);
+    }
+    return;
+  }
+  out.push({ path, before: show(before), after: show(after) });
+}
+
+// A CRD's schema changes in hundreds of fields that say little: those are only counted
+const COUNT_ONLY_KINDS = ['CustomResourceDefinition'];
+const MAX_FIELDS = 50;
+
 // What a Role grants and whom a Binding grants it to
 const RBAC_FIELDS: Record<string, string[]> = {
   Role: ['rules'],
@@ -107,9 +215,10 @@ function canonical(value: unknown): string {
   return JSON.stringify(value) ?? 'undefined';
 }
 
-/** Resources the new version adds or removes, plus those whose immutable or RBAC fields change.
- * Other changes are left out: mostly version bumps and chart internals, and ArgoCD shows the full
- * diff at sync time anyway. */
+/** Resource-level diff between two renders of a chart, keyed by kind + namespace + name. Changed
+ * fields skip noise (version bumps, chart labels, checksums, generated certificates, Secret
+ * values); immutable and RBAC fields are checked on the raw manifests, so a version in a selector
+ * still counts. */
 export function diffManifests(before: unknown[], after: unknown[]): ManifestChange[] {
   const index = (manifests: unknown[]) =>
     new Map(
@@ -129,15 +238,32 @@ export function diffManifests(before: unknown[], after: unknown[]): ManifestChan
     if (!a || !b) {
       // A new Role or Binding grants something; a removed one only takes away
       const rbacFields = b ? rbac.filter((field) => b[field] !== undefined) : [];
-      changes.push({ resource, change: a ? 'removed' : 'added', immutableFields: [], rbacFields });
+      changes.push({
+        resource,
+        change: a ? 'removed' : 'added',
+        fields: [],
+        fieldsNotListed: 0,
+        immutableFields: [],
+        rbacFields,
+      });
       continue;
     }
     const immutableFields = (IMMUTABLE_FIELDS[String(a.kind)] ?? []).filter(
       (path) => !isDeepStrictEqual(at(a, path), at(b, path)),
     );
     const rbacFields = rbac.filter((field) => canonical(a[field]) !== canonical(b[field]));
-    if (immutableFields.length || rbacFields.length) {
-      changes.push({ resource, change: 'changed', immutableFields, rbacFields });
+    const fields: Fields = [];
+    diffFields(normalize(a), normalize(b), '', fields);
+    const listed = COUNT_ONLY_KINDS.includes(String(a.kind)) ? [] : fields.slice(0, MAX_FIELDS);
+    if (fields.length || immutableFields.length || rbacFields.length) {
+      changes.push({
+        resource,
+        change: 'changed',
+        fields: listed,
+        fieldsNotListed: fields.length - listed.length,
+        immutableFields,
+        rbacFields,
+      });
     }
   }
   return changes.sort((x, y) => x.resource.localeCompare(y.resource));

@@ -48,31 +48,118 @@ notInDefaults: { anything: 1 }
 const statefulSet = (version: string, app = 'db') => ({
   kind: 'StatefulSet',
   metadata: { name: 'db', namespace: 'data', labels: { 'helm.sh/chart': `db-${version}` } },
-  spec: { selector: { matchLabels: { app } }, replicas: version === '1' ? 1 : 3 },
+  spec: { selector: { matchLabels: { app } }, replicas: 1 },
+});
+const resource = (fields: object) => ({
+  fields: [],
+  fieldsNotListed: 0,
+  immutableFields: [],
+  rbacFields: [],
+  ...fields,
 });
 
 describe('diffManifests', () => {
-  it('lists added and removed resources, not ordinary changes', () => {
+  it('lists added and removed resources, and skips non-resources', () => {
     expect(
       diffManifests(
         [statefulSet('1'), { kind: 'Service', metadata: { name: 'old' } }, { Digest: 'sha256:1' }],
         [statefulSet('2'), { kind: 'Service', metadata: { name: 'new' } }],
       ),
     ).toEqual([
-      { resource: 'Service new', change: 'added', immutableFields: [], rbacFields: [] },
-      { resource: 'Service old', change: 'removed', immutableFields: [], rbacFields: [] },
+      resource({ resource: 'Service new', change: 'added' }),
+      resource({ resource: 'Service old', change: 'removed' }),
     ]);
   });
 
   it('flags immutable fields that change', () => {
     expect(diffManifests([statefulSet('1')], [statefulSet('2', 'db2')])).toEqual([
-      {
+      resource({
         resource: 'StatefulSet data/db',
         change: 'changed',
+        fields: [{ path: 'spec.selector.matchLabels.app', before: '"db"', after: '"db2"' }],
         immutableFields: ['spec.selector'],
-        rbacFields: [],
-      },
+      }),
     ]);
+  });
+
+  const deployment = (version: string, spec: object) => ({
+    kind: 'Deployment',
+    metadata: {
+      name: 'app',
+      labels: { chart: `app-${version}`, 'app.kubernetes.io/version': version },
+      annotations: { 'checksum/config': version },
+    },
+    spec: {
+      template: {
+        spec: {
+          containers: [
+            { name: 'app', image: `ghcr.io/o/app:v${version}@sha256:${'a'.repeat(64)}`, ...spec },
+          ],
+        },
+      },
+    },
+  });
+
+  it('leaves out version bumps, chart labels, checksums and Secret values', () => {
+    const secret = (password: string) => ({
+      kind: 'Secret',
+      metadata: { name: 's' },
+      data: { password },
+    });
+    expect(
+      diffManifests(
+        [deployment('1.2.3', { args: ['--a'] }), secret('YQ==')],
+        [deployment('1.3.0', { args: ['--a'] }), secret('Yg==')],
+      ),
+    ).toEqual([]);
+  });
+
+  it('diffs fields like dyff: lists by name, args as a set, IPs as values', () => {
+    const [change] = diffManifests(
+      [deployment('1.0.0', { args: ['--b', '--ip=10.0.0.1'], env: [{ name: 'B', value: '1' }] })],
+      [
+        deployment('2.0.0', {
+          args: ['--a', '--b', '--ip=10.0.0.2'],
+          env: [
+            { name: 'A', value: '0' },
+            { name: 'B', value: '2' },
+          ],
+          resources: { limits: { memory: '256Mi' } },
+        }),
+      ],
+    );
+    const at = 'spec.template.spec.containers[app]';
+    expect(change).toEqual(
+      resource({
+        resource: 'Deployment app',
+        change: 'changed',
+        fields: [
+          { path: `${at}.args[]`, before: '"--ip=10.0.0.1"', after: null },
+          { path: `${at}.args[]`, before: null, after: '"--a"' },
+          { path: `${at}.args[]`, before: null, after: '"--ip=10.0.0.2"' },
+          { path: `${at}.env[B].value`, before: '"1"', after: '"2"' },
+          { path: `${at}.env[A]`, before: null, after: '{"name":"A","value":"0"}' },
+          { path: `${at}.resources`, before: null, after: '{"limits":{"memory":"256Mi"}}' },
+        ],
+      }),
+    );
+  });
+
+  it('only counts CRD fields, and caps the rest', () => {
+    const crd = (n: number) => ({
+      kind: 'CustomResourceDefinition',
+      metadata: { name: 'x.example.com' },
+      spec: { props: Object.fromEntries(Array.from({ length: n }, (_, i) => [`p${i}`, i])) },
+    });
+    const many = (n: number) => ({
+      kind: 'ConfigMap',
+      metadata: { name: 'big' },
+      data: Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, String(i)])),
+    });
+    const [big, schema] = diffManifests([crd(0), many(0)], [crd(3), many(60)]);
+    expect(schema).toMatchObject({ fields: [], fieldsNotListed: 3 });
+    expect(big!.fields).toHaveLength(50);
+    expect(big!.fieldsNotListed).toBe(10);
   });
 });
 
@@ -100,30 +187,22 @@ describe('diffManifests RBAC', () => {
     expect(diffManifests(before, [reordered, binding('operator')])).toEqual([]);
 
     expect(diffManifests(before, [role(['get', 'list', 'delete'], '2'), binding('ci')])).toEqual([
-      {
-        resource: 'ClusterRole operator',
-        change: 'changed',
-        immutableFields: [],
-        rbacFields: ['rules'],
-      },
-      {
+      expect.objectContaining({ resource: 'ClusterRole operator', rbacFields: ['rules'] }),
+      expect.objectContaining({
         resource: 'ClusterRoleBinding operator',
-        change: 'changed',
-        immutableFields: [],
         rbacFields: ['subjects'],
-      },
+      }),
     ]);
   });
 
   it('flags an added Role or Binding, not a removed one', () => {
     expect(diffManifests([role(['get'], '1')], [binding('ci')])).toEqual([
-      { resource: 'ClusterRole operator', change: 'removed', immutableFields: [], rbacFields: [] },
-      {
+      resource({ resource: 'ClusterRole operator', change: 'removed' }),
+      resource({
         resource: 'ClusterRoleBinding operator',
         change: 'added',
-        immutableFields: [],
         rbacFields: ['subjects', 'roleRef'],
-      },
+      }),
     ]);
   });
 });

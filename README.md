@@ -8,7 +8,10 @@ ArgoCD `Application`s and `ApplicationSet`s, then checks every Helm chart they d
   yours to bump, or the chart's default that comes with a chart upgrade? What would the newer tag fix?
 - what vulnerabilities do those images have (Trivy)?
 - what would upgrading an outdated chart change: vulnerabilities it fixes and brings in, values the
-  new version no longer has, a failing render, immutable fields that make the sync fail?
+  new version no longer has (from values, `helm.parameters` and subchart defaults), a failing
+  render, immutable fields that make the sync fail, RBAC changes, a field diff of the rendered
+  manifests (version bumps left out), and the changelog of every version in between
+  (`artifacthub.io/changes`, plus a link to the GitHub releases)?
 
 Works with any git host (GitHub, GitLab, Gitea/Forgejo, self-hosted).
 

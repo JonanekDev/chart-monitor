@@ -138,17 +138,18 @@ function upgradeRisky({ upgrade }: ChartFindingDetail): boolean {
 // Upgrades stored before RBAC changes were tracked don't have the field
 const rbacFields = (change: ManifestChange) => change.rbacFields ?? [];
 
-const addedOrRemoved = ({ manifestChanges }: ChartUpgrade) =>
-  manifestChanges.filter((c) => c.change !== 'changed');
-
-function changeSummary(upgrade: ChartUpgrade): string {
-  const changes = addedOrRemoved(upgrade);
-  return (['added', 'removed'] as const)
-    .map((kind) => [kind, changes.filter((c) => c.change === kind).length] as const)
+function changeSummary({ manifestChanges }: ChartUpgrade): string {
+  return (['changed', 'added', 'removed'] as const)
+    .map((kind) => [kind, manifestChanges.filter((c) => c.change === kind).length] as const)
     .filter(([, n]) => n > 0)
     .map(([kind, n]) => `${n} ${n === 1 ? 'resource' : 'resources'} ${kind}`)
     .join(', ');
 }
+
+// Upgrades stored before field diffs existed don't have them
+const fieldsOf = (change: ManifestChange) => change.fields ?? [];
+const fieldCount = (change: ManifestChange) =>
+  fieldsOf(change).length + (change.fieldsNotListed ?? 0);
 
 // Worth seeing without opening the changelog, from every version in the range
 const IMPORTANT_KINDS = ['security', 'removed', 'deprecated'];
@@ -349,11 +350,11 @@ onUnmounted(() => {
                   <p
                     v-if="
                       !group.chart.upgrade.renderError &&
-                      addedOrRemoved(group.chart.upgrade).length === 0
+                      group.chart.upgrade.manifestChanges.length === 0
                     "
                     class="text-muted"
                   >
-                    No resources added or removed.
+                    Nothing changes in the rendered manifests apart from versions.
                   </p>
                   <p
                     v-for="change in group.chart.upgrade.manifestChanges.filter(
@@ -386,17 +387,49 @@ onUnmounted(() => {
                       {{ rbacFields(change).join(', ') }} change, review the permissions
                     </span>
                   </p>
-                  <details v-if="addedOrRemoved(group.chart.upgrade).length">
+                  <details v-if="group.chart.upgrade.manifestChanges.length">
                     <summary class="changes-summary">
                       {{ changeSummary(group.chart.upgrade) }}
                     </summary>
                     <ul class="resource-list">
                       <li
-                        v-for="change in addedOrRemoved(group.chart.upgrade)"
+                        v-for="change in group.chart.upgrade.manifestChanges"
                         :key="change.resource"
                       >
-                        <span :class="['change-badge', change.change]">{{ change.change }}</span>
-                        <span class="mono">{{ change.resource }}</span>
+                        <details v-if="fieldCount(change)" class="resource-diff">
+                          <summary>
+                            <span :class="['change-badge', change.change]">{{
+                              change.change
+                            }}</span>
+                            <span class="mono">{{ change.resource }}</span>
+                            <span class="text-muted">
+                              {{ fieldCount(change) }}
+                              {{ fieldCount(change) === 1 ? 'field' : 'fields' }}
+                            </span>
+                          </summary>
+                          <div class="dyff mono">
+                            <template v-for="(field, i) in fieldsOf(change)" :key="i">
+                              <div class="dyff-path">{{ field.path }}</div>
+                              <div v-if="field.before !== null" class="dyff-line removed">
+                                − {{ field.before }}
+                              </div>
+                              <div v-if="field.after !== null" class="dyff-line added">
+                                + {{ field.after }}
+                              </div>
+                            </template>
+                            <div v-if="change.fieldsNotListed" class="text-muted">
+                              {{
+                                fieldsOf(change).length
+                                  ? `+${change.fieldsNotListed} more fields`
+                                  : `${change.fieldsNotListed} fields change in the schema (not listed)`
+                              }}
+                            </div>
+                          </div>
+                        </details>
+                        <template v-else>
+                          <span :class="['change-badge', change.change]">{{ change.change }}</span>
+                          <span class="mono">{{ change.resource }}</span>
+                        </template>
                       </li>
                     </ul>
                   </details>
@@ -945,6 +978,28 @@ progress {
   padding-left: var(--space-4);
   display: grid;
   gap: var(--space-1);
+}
+.resource-diff summary {
+  cursor: pointer;
+}
+.dyff {
+  margin: var(--space-1) 0 var(--space-2) var(--space-4);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.dyff-path {
+  margin-top: var(--space-2);
+  color: var(--color-text-muted);
+}
+.dyff-line {
+  padding-left: var(--space-3);
+  white-space: pre-wrap;
+}
+.dyff-line.removed {
+  color: #ef4444;
+}
+.dyff-line.added {
+  color: var(--color-primary);
 }
 .change-badge {
   font-family: 'DM Mono', monospace;
