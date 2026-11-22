@@ -6,9 +6,25 @@ import {
   ApiError,
   createChannel,
   deleteChannel,
+  getSession,
   listChannels,
+  logoutEverywhere,
   testChannel,
 } from '../api/client.js';
+
+// Only with login on (not with AUTH_DISABLED)
+const authEnabled = ref(false);
+const logoutError = ref<string | null>(null);
+
+async function onLogoutEverywhere() {
+  if (!window.confirm('Log out every browser and device, this one included?')) return;
+  try {
+    await logoutEverywhere();
+    window.location.assign('/login');
+  } catch (error) {
+    logoutError.value = (error as Error).message;
+  }
+}
 
 const channels = ref<Channel[]>([]);
 const loadError = ref<string | null>(null);
@@ -35,6 +51,9 @@ async function refresh() {
     loadError.value = 'Failed to load channels.';
   }
 }
+onMounted(async () => {
+  authEnabled.value = (await getSession().catch(() => null))?.authEnabled ?? false;
+});
 onMounted(refresh);
 
 async function onAdd() {
@@ -191,6 +210,18 @@ async function onDelete(channel: Channel) {
         {{ isSaving ? 'Saving…' : 'Add and send test' }}
       </button>
     </form>
+  </section>
+
+  <section v-if="authEnabled" class="card section">
+    <h2 class="mono">Sessions</h2>
+    <p class="text-muted intro">
+      A login lasts 7 days from the last use. Logging out ends it on the server, so a copy of the
+      cookie stops working too. Left yourself logged in somewhere?
+    </p>
+    <button type="button" class="btn-primary" @click="onLogoutEverywhere">
+      Log out everywhere
+    </button>
+    <p v-if="logoutError" class="error">{{ logoutError }}</p>
   </section>
 </template>
 

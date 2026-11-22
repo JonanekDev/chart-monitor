@@ -151,6 +151,13 @@ model ChangelogCache {
   createdAt DateTime @default(now())
 }
 
+/// A login; the cookie holds its signed id, so logging out really ends it
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
 /// Small key/value store for app-generated settings (e.g. the session signing secret)
 model AppSetting {
   key   String @id

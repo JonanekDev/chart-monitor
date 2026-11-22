@@ -70,6 +70,12 @@ export async function logout(): Promise<void> {
   await fetch('/api/logout', { method: 'POST' });
 }
 
+/** Ends every session, this one included */
+export async function logoutEverywhere(): Promise<void> {
+  const response = await fetch('/api/logout-all', { method: 'POST' });
+  if (!response.ok) throw new ApiError(`Logging out failed with status ${response.status}`);
+}
+
 export function listMonitors(): Promise<Monitor[]> {
   return request('/api/monitors', z.array(monitorSchema));
 }

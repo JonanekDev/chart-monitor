@@ -151,6 +151,10 @@ const fieldsOf = (change: ManifestChange) => change.fields ?? [];
 const fieldCount = (change: ManifestChange) =>
   fieldsOf(change).length + (change.fieldsNotListed ?? 0);
 
+// Changelog links come from charts (untrusted) and may be stored from before the backend filtered
+// them: only http(s), never javascript: or data:
+const safeUrl = (url: string | null) => (url && /^https?:\/\//i.test(url) ? url : undefined);
+
 // Worth seeing without opening the changelog, from every version in the range
 const IMPORTANT_KINDS = ['security', 'removed', 'deprecated'];
 
@@ -562,7 +566,7 @@ onUnmounted(() => {
                             <a
                               v-for="link in change.links"
                               :key="link.url"
-                              :href="link.url"
+                              :href="safeUrl(link.url)"
                               target="_blank"
                               rel="noopener noreferrer"
                               >{{ link.name }}</a
@@ -583,7 +587,7 @@ onUnmounted(() => {
                       </template>
                       <a
                         v-if="group.chart.upgrade.changelog.releasesUrl"
-                        :href="group.chart.upgrade.changelog.releasesUrl"
+                        :href="safeUrl(group.chart.upgrade.changelog.releasesUrl)"
                         target="_blank"
                         rel="noopener noreferrer"
                         >Release notes on GitHub</a

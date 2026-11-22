@@ -25,8 +25,10 @@ export function parseChanges(annotation: string | undefined): ChangelogEntry[] {
         kind: typeof item.kind === 'string' ? item.kind : 'changed',
         description: item.description,
         links: links
+          // Charts are untrusted and the UI renders these as links: no javascript: or data: URLs
           .filter(
-            (l): l is { url: string; name?: unknown } => isObject(l) && typeof l.url === 'string',
+            (l): l is { url: string; name?: unknown } =>
+              isObject(l) && typeof l.url === 'string' && /^https?:\/\//i.test(l.url),
           )
           .map((l) => ({ name: typeof l.name === 'string' ? l.name : l.url, url: l.url })),
       },

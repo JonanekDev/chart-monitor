@@ -22,6 +22,10 @@ describe('parseChanges', () => {
     - name: GHSA
       url: https://github.com/advisories/GHSA-1
     - not a link
+    - name: click me
+      url: javascript:fetch('/api/monitors').then(r => r.text()).then(alert)
+    - name: data
+      url: data:text/html,<script>alert(1)</script>
 - Plain old entry
 `),
     ).toEqual([

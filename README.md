@@ -29,19 +29,20 @@ Open http://localhost:3000 and log in with your password.
 
 All settings go in `.env` in the repo root.
 
-| Variable                | Purpose                                                                                 |
-| ----------------------- | --------------------------------------------------------------------------------------- |
-| `ADMIN_PASSWORD_HASH`   | **Required.** bcrypt hash of the login password, in single quotes (see below).          |
-| `AUTH_DISABLED`         | `true` turns the login off, for setups with SSO in front of the app (default `false`).  |
-| `GITHUB_TOKEN`          | Private GitHub repos. Fine-grained token, _Contents: Read-only_.                        |
-| `GIT_CREDENTIALS`       | Private repos on other hosts, comma-separated `https://user:token@host` (see below).    |
-| `HELM_REPO_CREDENTIALS` | Private Helm repos (classic), comma-separated `https://user:password@host/path`.        |
-| `DOCKER_CONFIG`         | Private registries: directory with a Docker `config.json` (see below).                  |
-| `TZ`                    | Time zone for scan schedules, e.g. `Europe/Prague` (default `UTC`).                     |
-| `SCAN_RETENTION`        | Scans kept per monitor; older ones are deleted (default `10`).                          |
-| `PUBLIC_URL`            | Where the app is reachable, for links in notifications (e.g. `https://cm.example.com`). |
-| `PORT`                  | Port the app is published on (default `3000`).                                          |
-| `INCLUDE_PRERELEASES`   | Also treat pre-release versions (`1.2.0-rc.1`) as updates (default `false`).            |
+| Variable                | Purpose                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| `ADMIN_PASSWORD_HASH`   | **Required.** bcrypt hash of the login password, in single quotes (see below).                       |
+| `AUTH_DISABLED`         | `true` turns the login off, for setups with SSO in front of the app (default `false`).               |
+| `GITHUB_TOKEN`          | Private GitHub repos. Fine-grained token, _Contents: Read-only_.                                     |
+| `GIT_CREDENTIALS`       | Private repos on other hosts, comma-separated `https://user:token@host` (see below).                 |
+| `HELM_REPO_CREDENTIALS` | Private Helm repos (classic), comma-separated `https://user:password@host/path`.                     |
+| `DOCKER_CONFIG`         | Private registries: directory with a Docker `config.json` (see below).                               |
+| `TZ`                    | Time zone for scan schedules, e.g. `Europe/Prague` (default `UTC`).                                  |
+| `SCAN_RETENTION`        | Scans kept per monitor; older ones are deleted (default `10`).                                       |
+| `PUBLIC_URL`            | Where the app is reachable, for links in notifications (e.g. `https://cm.example.com`).              |
+| `PORT`                  | Port the app is published on (default `3000`).                                                       |
+| `INCLUDE_PRERELEASES`   | Also treat pre-release versions (`1.2.0-rc.1`) as updates (default `false`).                         |
+| `TRUST_PROXY`           | Behind a reverse proxy: its IP or CIDR (comma-separated), so the login rate limit sees real clients. |
 
 Generate the password hash with `htpasswd` (package `apache2-utils` / `httpd-tools`):
 
@@ -144,3 +145,10 @@ chart from ChartMuseum and as OCI, one of them with the image tag set in its val
 
 Anyone who can log in can make the app clone and fetch arbitrary URLs, so keep the password strong.
 Put the app behind HTTPS (a reverse proxy) when it is reachable from outside your network.
+
+A login lasts 7 days from its last use. The cookie only holds a signed random id of a session kept
+in the database: logging out ends it on the server, Settings → "Log out everywhere" ends all of
+them, and changing the password does too. Login attempts are limited to 5 a minute per client; behind
+a reverse proxy, set `TRUST_PROXY` to the proxy's address, otherwise every client shares the
+proxy's limit (`true` trusts any sender of `X-Forwarded-For`, so only use it when the app can't be
+reached except through the proxy).

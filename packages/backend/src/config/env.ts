@@ -66,6 +66,17 @@ const envSchema = z.object({
     .optional()
     .transform((val) => val || undefined)
     .pipe(z.url().optional()),
+  /** Behind a reverse proxy: whose X-Forwarded-For to believe, so the login rate limit sees the
+   * real client. The proxy's IP or CIDR (comma-separated), or `true` for any (only when the app
+   * can't be reached except through the proxy, else the header can be forged). Off by default. */
+  TRUST_PROXY: z
+    .string()
+    .optional()
+    .transform((val): boolean | string => {
+      const value = val?.trim() ?? '';
+      if (!value || value === 'false') return false;
+      return value === 'true' ? true : value;
+    }),
   /** Scans kept per monitor; older ones are deleted after each scan */
   SCAN_RETENTION: z.coerce.number().int().min(1).default(10),
 });

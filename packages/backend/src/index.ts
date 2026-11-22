@@ -6,7 +6,8 @@ import { env } from './config/env.js';
 import { scanRoutes } from './routes/scans.js';
 import { prisma } from './db/client.js';
 import { failInterruptedScans } from './scan/scanService.js';
-import { loadSessionSecret, setupAuth } from './auth/auth.js';
+import { loadSessionSecret, prismaSessionStore, setupAuth } from './auth/auth.js';
+import { securityHeaders } from './securityHeaders.js';
 import { monitorRoutes } from './routes/monitors.js';
 import { channelRoutes } from './routes/channels.js';
 import { Scheduler } from './monitor/scheduler.js';
@@ -16,7 +17,8 @@ import { runScheduled, startScheduler, type MonitorDeps } from './monitor/monito
 // the UI itself and proxies /api here.
 const FRONTEND_DIST = fileURLToPath(new URL('../../frontend/dist', import.meta.url));
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, trustProxy: env.TRUST_PROXY });
+securityHeaders(app);
 
 const interrupted = await failInterruptedScans(prisma);
 if (interrupted > 0) app.log.warn(`Marked ${interrupted} interrupted scan(s) as failed`);
@@ -26,6 +28,7 @@ await setupAuth(app, {
   passwordHash: env.ADMIN_PASSWORD_HASH,
   disabled: env.AUTH_DISABLED,
   secret: await loadSessionSecret(prisma),
+  sessions: prismaSessionStore(prisma),
 });
 if (env.AUTH_DISABLED) app.log.warn('AUTH_DISABLED=true: the app is reachable without login');
 
