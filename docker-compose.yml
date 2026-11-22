@@ -17,13 +17,56 @@ services:
       TRIVY_SERVER_URL: http://trivy:4954
       # Self-hosted git / Helm repos with an internal CA: mount its PEM below and uncomment
       # EXTRA_CA_CERTS: /certs/internal-ca.crt
+      # Private registries (image tags, OCI charts, trivy pulls): a Docker config.json with "auths"
+      # DOCKER_CONFIG: /secrets/docker
     volumes:
       - backend_data:/data
       # - ./certs/internal-ca.crt:/certs/internal-ca.crt:ro
+      # - ./secrets/docker/config.json:/secrets/docker/config.json:ro
     ports:
       - '${PORT:-3000}:3000'
     depends_on:
       - trivy
+
+  # Private registry + ChartMuseum to test logins against (dev/auth-test/setup.sh first, then
+  # docker compose -f docker-compose.yml -f dev/auth-test/app.yaml --profile auth-test up -d)
+  auth-registry:
+    image: registry:2.8.3
+    profiles: [auth-test]
+    environment:
+      REGISTRY_HTTP_TLS_CERTIFICATE: /auth-test/server.crt
+      REGISTRY_HTTP_TLS_KEY: /auth-test/server.key
+      REGISTRY_AUTH: htpasswd
+      REGISTRY_AUTH_HTPASSWD_REALM: auth-test
+      REGISTRY_AUTH_HTPASSWD_PATH: /auth-test/htpasswd
+    volumes:
+      - ./dev/auth-test/generated:/auth-test:ro
+
+  auth-chartmuseum:
+    image: ghcr.io/helm/chartmuseum:v0.16.2
+    profiles: [auth-test]
+    env_file:
+      - path: dev/auth-test/generated/chartmuseum.env # BASIC_AUTH_PASS
+        required: false
+    environment:
+      PORT: 8080
+      STORAGE: local
+      STORAGE_LOCAL_ROOTDIR: /charts
+      BASIC_AUTH_USER: testuser
+      TLS_CERT: /auth-test/server.crt
+      TLS_KEY: /auth-test/server.key
+    tmpfs:
+      - /charts:mode=1777
+    volumes:
+      - ./dev/auth-test/generated:/auth-test:ro
+
+  auth-test-seed:
+    image: alpine:3.20
+    profiles: [auth-test]
+    command: sh /work/seed.sh
+    depends_on: [auth-registry, auth-chartmuseum]
+    volumes:
+      - ./dev/auth-test:/work:ro
 
 volumes:
   backend_data:

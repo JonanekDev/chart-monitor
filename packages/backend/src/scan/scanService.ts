@@ -13,6 +13,7 @@ import {
   type ScanSummary,
 } from '@chart-monitor/shared';
 import type { Monitor, Prisma, PrismaClient, Scan } from '../generated/prisma/client.js';
+import { redactSecrets } from '../config/auth.js';
 import { ScanNotFoundError } from '../errors.js';
 import { executeScan, type ScanReporter } from './runScan.js';
 import { notifyAfterScan } from '../notify/notifyAfterScan.js';
@@ -184,7 +185,7 @@ async function runScan(prisma: PrismaClient, scan: Scan): Promise<void> {
       data: { state: ScanState.SUCCEEDED, finishedAt: new Date(), phase: null },
     });
   } catch (error) {
-    console.error(`[Scan ${scan.id}] Scan execution failed:`, error);
+    console.error(`[Scan ${scan.id}] Scan execution failed:`, redactSecrets(String(error)));
     // `phase` is kept, so the UI can tell in which step it failed; partial findings stay too.
     // updateMany: the monitor (and with it this scan) may have been deleted meanwhile.
     await prisma.scan.updateMany({
@@ -192,7 +193,7 @@ async function runScan(prisma: PrismaClient, scan: Scan): Promise<void> {
       data: {
         state: ScanState.FAILED,
         finishedAt: new Date(),
-        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        errorMessage: redactSecrets(error instanceof Error ? error.message : 'Unknown error'),
       },
     });
   }

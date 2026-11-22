@@ -3,7 +3,8 @@ import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { ConfigError, RepoAccessError } from '../errors.js';
+import { parseCredentialUrls } from '../config/credentials.js';
+import { RepoAccessError } from '../errors.js';
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 120_000;
@@ -39,24 +40,11 @@ export function toCloneUrl(repoUrl: string): string {
   return url.toString();
 }
 
-/** Parses `GIT_CREDENTIALS`: entries in git-credential-store format (`https://user:token@host`),
- * separated by newlines, commas or spaces. Error messages never include the entry itself. */
+/** Parses `GIT_CREDENTIALS` into git-credential-store lines (`https://user:token@host`) */
 export function parseGitCredentials(raw: string | undefined): string[] {
-  const entries = (raw ?? '').split(/[\s,]+/).filter(Boolean);
-  return entries.map((entry, i) => {
-    let url: URL | null = null;
-    try {
-      url = new URL(entry);
-    } catch {
-      // reported below
-    }
-    if (!url || !['https:', 'http:'].includes(url.protocol) || !url.username || !url.password) {
-      throw new ConfigError(
-        `GIT_CREDENTIALS entry #${i + 1} is invalid, expected https://user:token@host`,
-      );
-    }
-    return `${url.protocol}//${url.username}:${url.password}@${url.host}`;
-  });
+  return parseCredentialUrls(raw, 'GIT_CREDENTIALS').map(
+    (url) => `${url.protocol}//${url.username}:${url.password}@${url.host}`,
+  );
 }
 
 export interface GitAuth {

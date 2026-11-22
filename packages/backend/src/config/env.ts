@@ -1,8 +1,10 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { ConfigError } from '../errors.js';
 import { parseGitCredentials } from '../git/repoSnapshot.js';
+import { parseDockerConfig, parseHelmRepoCredentials } from './credentials.js';
 
 // Repo-root .env, same file docker compose reads. Resolved from this file (src/config or
 // dist/config), so it works whatever the working directory is. Variables already set in the
@@ -30,6 +32,23 @@ const envSchema = z.object({
   /** Optional. Tokens for private repos on any git host: `https://user:token@host`, one per line
    * (or comma-separated). Each token is only sent to its own host. */
   GIT_CREDENTIALS: z.string().optional().transform(parseGitCredentials),
+  /** Optional. Private classic Helm repos: `https://user:password@host/path`, comma-separated.
+   * The longest matching URL prefix wins; each login only goes to its own repo. */
+  HELM_REPO_CREDENTIALS: z.string().optional().transform(parseHelmRepoCredentials),
+  /** Optional. Directory with a Docker config.json (`auths`) for private registries: image tags,
+   * OCI charts (helm) and image pulls (trivy, which reads it itself). Checked at startup. */
+  DOCKER_CONFIG: z
+    .string()
+    .optional()
+    .transform((dir) => {
+      if (!dir) return undefined;
+      const file = path.join(dir, 'config.json');
+      if (!existsSync(file))
+        throw new ConfigError(`DOCKER_CONFIG is set, but ${file} doesn't exist`);
+      const { logins, warnings } = parseDockerConfig(readFileSync(file, 'utf-8'), file);
+      for (const warning of warnings) console.warn(`Configuration warning: ${warning}`);
+      return { file, logins };
+    }),
   INCLUDE_PRERELEASES: booleanFlag,
   /** bcrypt hash of the login password. Required unless AUTH_DISABLED. */
   ADMIN_PASSWORD_HASH: z

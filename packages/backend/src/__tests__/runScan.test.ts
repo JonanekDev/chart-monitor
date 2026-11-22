@@ -33,7 +33,7 @@ const deployment = (tag: string, app: string) => ({
 });
 vi.mock('../helm/renderChart.js', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  renderChart: async ({ targetRevision }: { targetRevision: string }) =>
+  renderChart: async (_helm: unknown, { targetRevision }: { targetRevision: string }) =>
     targetRevision === '1.0.0' ? [deployment('7.0', 'redis')] : [deployment('7.2', 'cache')],
   showChartValues: async () => ({}),
 }));
@@ -121,6 +121,8 @@ describe('classifyOutdatedImages', () => {
     ctx: { openRepo: async () => memoryRepo({}), warn: () => {} },
     source: { repoURL: 'https://charts.example.com', chart: 'redis', targetRevision: '1.0.0' },
     valuesDocuments: ['app: { tag: 1.0 }'],
+    // renderChart is mocked, so the session is never used
+    helm: null as never,
   };
   const finding = (image: string, currentTag: string, latestTag: string) => ({
     applicationName: 'app',

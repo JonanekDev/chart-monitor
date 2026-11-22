@@ -26,17 +26,19 @@ Open http://localhost:3000 and log in with your password.
 
 All settings go in `.env` in the repo root.
 
-| Variable              | Purpose                                                                                 |
-| --------------------- | --------------------------------------------------------------------------------------- |
-| `ADMIN_PASSWORD_HASH` | **Required.** bcrypt hash of the login password, in single quotes (see below).          |
-| `AUTH_DISABLED`       | `true` turns the login off, for setups with SSO in front of the app (default `false`).  |
-| `GITHUB_TOKEN`        | Private GitHub repos. Fine-grained token, _Contents: Read-only_.                        |
-| `GIT_CREDENTIALS`     | Private repos on other hosts, comma-separated `https://user:token@host` (see below).    |
-| `TZ`                  | Time zone for scan schedules, e.g. `Europe/Prague` (default `UTC`).                     |
-| `SCAN_RETENTION`      | Scans kept per monitor; older ones are deleted (default `10`).                          |
-| `PUBLIC_URL`          | Where the app is reachable, for links in notifications (e.g. `https://cm.example.com`). |
-| `PORT`                | Port the app is published on (default `3000`).                                          |
-| `INCLUDE_PRERELEASES` | Also treat pre-release versions (`1.2.0-rc.1`) as updates (default `false`).            |
+| Variable                | Purpose                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------- |
+| `ADMIN_PASSWORD_HASH`   | **Required.** bcrypt hash of the login password, in single quotes (see below).          |
+| `AUTH_DISABLED`         | `true` turns the login off, for setups with SSO in front of the app (default `false`).  |
+| `GITHUB_TOKEN`          | Private GitHub repos. Fine-grained token, _Contents: Read-only_.                        |
+| `GIT_CREDENTIALS`       | Private repos on other hosts, comma-separated `https://user:token@host` (see below).    |
+| `HELM_REPO_CREDENTIALS` | Private Helm repos (classic), comma-separated `https://user:password@host/path`.        |
+| `DOCKER_CONFIG`         | Private registries: directory with a Docker `config.json` (see below).                  |
+| `TZ`                    | Time zone for scan schedules, e.g. `Europe/Prague` (default `UTC`).                     |
+| `SCAN_RETENTION`        | Scans kept per monitor; older ones are deleted (default `10`).                          |
+| `PUBLIC_URL`            | Where the app is reachable, for links in notifications (e.g. `https://cm.example.com`). |
+| `PORT`                  | Port the app is published on (default `3000`).                                          |
+| `INCLUDE_PRERELEASES`   | Also treat pre-release versions (`1.2.0-rc.1`) as updates (default `false`).            |
 
 Generate the password hash with `htpasswd` (package `apache2-utils` / `httpd-tools`):
 
@@ -67,6 +69,29 @@ Each token is only ever sent to its own host. For `GIT_CREDENTIALS` use user `oa
 GIT_CREDENTIALS=https://oauth2:glpat-xxx@gitlab.example.com,https://me:xxx@gitea.example.com
 ```
 
+**Private Helm repos and registries:** classic Helm repos (ChartMuseum, Nexus, Artifactory, Harbor's
+ChartMuseum…) take a login per URL; the longest matching prefix wins, so one host can serve repos
+with different logins:
+
+```
+HELM_REPO_CREDENTIALS=https://ci:xxx@nexus.example.com/repository/helm-private,https://u:xxx@charts.example.com
+```
+
+Registries (image tags, OCI charts, and the image pulls of the vulnerability scan) use a Docker
+`config.json` with plain `"auths"` entries. Uncomment the `DOCKER_CONFIG` lines in
+`docker-compose.yml` and put the file at `secrets/docker/config.json`:
+
+```json
+{ "auths": { "harbor.example.com": { "auth": "<base64 of user:password>" } } }
+```
+
+Docker Hub can be keyed `docker.io`, `index.docker.io` or `https://index.docker.io/v1/`. The file is
+checked at startup: a `credsStore` (e.g. Docker Desktop's) stops the app, since it holds every login;
+hosts under `credHelpers` or with an empty entry get a warning and are accessed without login. Cloud
+registries with short-lived tokens (ECR, GCR/Artifact Registry, ACR) aren't supported yet. A refused
+login (or a 404 from a host we have a login for, which may mean missing permissions) shows up as a
+warning on the scan, and logins never appear in warnings or errors.
+
 **Notifications:** add a Discord or JSON webhook channel under Settings (gear icon), then pick it in a
 monitor along with what to report: new vulnerabilities from a chosen severity (optionally only ones
 with a fix), new chart versions (all of them, or only those whose upgrade fixes vulnerabilities from
@@ -83,7 +108,7 @@ what is new since the previous one.
 - `goTemplate: true` with plain placeholders (`{{ .name }}`, not template functions)
 - Helm values from `valueFiles` (`$ref/...`), `values` and `valuesObject`
 - umbrella charts (a git `path` whose `Chart.yaml` depends on external charts)
-- Helm repos over HTTPS and OCI
+- Helm repos over HTTPS and OCI, public or with a login
 
 Anything skipped (e.g. `clusters` or `pullRequest` generators, which only exist inside a running
 ArgoCD) is listed as a warning on the scan.
@@ -97,6 +122,17 @@ pnpm install
 pnpm --filter @chart-monitor/backend run db:migrate
 pnpm dev   # UI with hot reload on http://localhost:5173, API on :3000
 ```
+
+To try private repos and registries, the `auth-test` profile starts a registry and ChartMuseum
+with TLS and a login, seeded with a chart (classic and OCI) that uses a private image:
+
+```bash
+sh dev/auth-test/setup.sh   # throwaway CA, certificates and password into dev/auth-test/generated
+docker compose -f docker-compose.yml -f dev/auth-test/app.yaml --profile auth-test up -d --build
+```
+
+Then add a monitor for a repo with an Application using `https://auth-chartmuseum:8080` or
+`auth-registry:5000/charts` (chart `auth-test-app`, version `0.1.0`).
 
 ## Security
 

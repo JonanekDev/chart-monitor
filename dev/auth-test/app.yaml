@@ -1,0 +1,13 @@
+# Points the app at the auth-test services; use together with the profile:
+#   docker compose -f docker-compose.yml -f dev/auth-test/app.yaml --profile auth-test up -d
+services:
+  app:
+    env_file:
+      - path: .env
+        required: false
+      - dev/auth-test/generated/app.env
+    environment:
+      EXTRA_CA_CERTS: /auth-test/ca.crt
+      DOCKER_CONFIG: /auth-test/docker
+    volumes:
+      - ./dev/auth-test/generated:/auth-test:ro

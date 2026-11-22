@@ -1,0 +1,5 @@
+apiVersion: v2
+name: auth-test-app
+description: A chart for the auth-test profile, pulling its image from the private test registry
+version: 0.1.0
+appVersion: 1.0.0

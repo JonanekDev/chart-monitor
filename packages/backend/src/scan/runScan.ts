@@ -13,7 +13,7 @@ import { resolveApplicationSets } from '../argocd/findApplicationSets.js';
 import { withWarningPrefix, type ApplicationSource, type ScanContext } from '../argocd/types.js';
 import { fetchChartVersions, normalizeChartRepoUrl } from '../helm/chartVersions.js';
 import { compareVersions, findLatestVersion, isSureUpgrade } from '../helm/versionCompare.js';
-import { findImages, renderChart, showChartValues } from '../helm/renderChart.js';
+import { findImages, HelmSession, renderChart, showChartValues } from '../helm/renderChart.js';
 import { diffManifests, diffVulnerabilities, removedValueKeys } from '../helm/upgradeCheck.js';
 import { collectValuesDocuments } from '../argocd/valueFiles.js';
 import { expandUmbrellaChart, type ChartToScan } from '../argocd/umbrellaChart.js';
@@ -21,7 +21,9 @@ import { createRepoOpener } from '../git/repoSnapshot.js';
 import { fetchImageTags, parseImageRef } from '../registry/imageRef.js';
 import { scanImageForVulnerabilities, type ImageVulnerability } from '../trivy/scanImage.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
+import { redactSecrets } from '../config/auth.js';
 import { env } from '../config/env.js';
+import { RegistryAuthError } from '../errors.js';
 
 // Each trivy scan pulls image layers and runs full vuln-DB matching — cap how many run at once
 const CVE_SCAN_CONCURRENCY = 4;
@@ -39,12 +41,18 @@ function describeError(error: unknown): string {
   return detail ? `${message}: ${detail.slice(0, 300)}` : message;
 }
 
-async function resolveChartFinding(
-  applicationName: string,
-  applicationSetName: string,
-  source: ApplicationSource & { chart: string; targetRevision: string },
-): Promise<ChartFinding> {
-  const versions = await fetchChartVersions(source.repoURL, source.chart).catch(() => []);
+/** A missing version/tag list stays quiet (non-semver tags, registries without a tag list), a
+ * refused login is worth a warning */
+const warnOnAuthError = (warn: (message: string) => void) => (error: unknown) => {
+  if (error instanceof RegistryAuthError) warn(error.message);
+  return [] as string[];
+};
+
+async function resolveChartFinding(job: ChartJob): Promise<ChartFinding> {
+  const { applicationName, applicationSetName, source } = job;
+  const versions = await fetchChartVersions(source.repoURL, source.chart).catch(
+    warnOnAuthError(job.ctx.warn),
+  );
   const latestVersion = findLatestVersion(versions, env.INCLUDE_PRERELEASES);
 
   return {
@@ -59,14 +67,12 @@ async function resolveChartFinding(
   };
 }
 
-async function resolveImageFindings(
-  applicationName: string,
-  images: string[],
-): Promise<ImageFinding[]> {
+async function resolveImageFindings(job: ChartJob, images: string[]): Promise<ImageFinding[]> {
+  const { applicationName } = job;
   return Promise.all(
     images.map(async (image): Promise<ImageFinding> => {
       const [repository, currentTag = 'latest'] = splitImageTag(image);
-      const tags = await fetchImageTags(image).catch(() => []);
+      const tags = await fetchImageTags(image).catch(warnOnAuthError(job.ctx.warn));
       const latestTag = findLatestVersion(tags, env.INCLUDE_PRERELEASES);
 
       return {
@@ -89,7 +95,7 @@ async function chartDefaultImages(job: ChartJob, images: string[]): Promise<stri
   const parameters = job.source.helm?.parameters ?? [];
   if (job.valuesDocuments.length === 0 && parameters.length === 0) return images;
   const withoutValues = { ...job.source, helm: { ...job.source.helm, parameters: [] } };
-  return renderChart(withoutValues).then(findImages, () => null);
+  return renderChart(job.helm, withoutValues).then(findImages, () => null);
 }
 
 /** Repository path + tag without the registry, so a mirror or global.imageRegistry doesn't count
@@ -167,12 +173,12 @@ async function checkUpgrade(
 ): Promise<{ upgrade: ChartUpgrade; latestImages: string[] | null }> {
   const latest = { ...job.source, targetRevision: latestVersion };
   const [oldDefaults, newDefaults] = await Promise.all([
-    showChartValues(job.source),
-    showChartValues(latest),
+    showChartValues(job.helm, job.source),
+    showChartValues(job.helm, latest),
   ]);
   const removedValues = removedValueKeys(job.valuesDocuments, oldDefaults, newDefaults);
   try {
-    const latestManifests = await renderChart(latest, job.valuesDocuments);
+    const latestManifests = await renderChart(job.helm, latest, job.valuesDocuments);
     return {
       upgrade: {
         removedValues,
@@ -266,6 +272,7 @@ interface ChartJob {
   ctx: ScanContext;
   source: ApplicationSource & { chart: string; targetRevision: string };
   valuesDocuments: string[];
+  helm: HelmSession;
 }
 
 export async function executeScan(
@@ -277,7 +284,9 @@ export async function executeScan(
     githubToken: env.GITHUB_TOKEN,
     credentials: env.GIT_CREDENTIALS,
   });
-  const ctx: ScanContext = { openRepo, warn: (message) => warnings.add(message) };
+  const helm = await HelmSession.create();
+  // Warnings are stored and shown: no credential a CLI echoed may end up in them
+  const ctx: ScanContext = { openRepo, warn: (message) => warnings.add(redactSecrets(message)) };
   const flushWarnings = () => reporter.warnings([...warnings]);
 
   try {
@@ -308,6 +317,7 @@ export async function executeScan(
           ctx: appCtx,
           source: source as ChartJob['source'],
           valuesDocuments,
+          helm,
         });
       }
     }
@@ -316,11 +326,7 @@ export async function executeScan(
     // Cheap step first, so chart versions are visible long before the slow image scans finish
     await reporter.phase(ScanPhase.CHART_VERSIONS, jobs.length);
     const chartFindings = await mapWithConcurrency(jobs, CHART_CONCURRENCY, async (job) => {
-      const finding = await resolveChartFinding(
-        job.applicationName,
-        job.applicationSetName,
-        job.source,
-      );
+      const finding = await resolveChartFinding(job);
       await reporter.chartFinding(finding);
       await reporter.step(`${job.applicationName} (${job.source.chart})`);
       return finding;
@@ -335,12 +341,14 @@ export async function executeScan(
       imageJobs,
       CHART_CONCURRENCY,
       async ({ job, chartOutdated }) => {
-        const manifests = await renderChart(job.source, job.valuesDocuments).catch((error) => {
-          job.ctx.warn(`images could not be determined: ${describeError(error)}`);
-          return null;
-        });
+        const manifests = await renderChart(job.helm, job.source, job.valuesDocuments).catch(
+          (error) => {
+            job.ctx.warn(`images could not be determined: ${describeError(error)}`);
+            return null;
+          },
+        );
         const images = findImages(manifests ?? []);
-        const findings = await resolveImageFindings(job.applicationName, images);
+        const findings = await resolveImageFindings(job, images);
         const latestTagScans = await classifyOutdatedImages(job, chartOutdated, images, findings);
         await reporter.imageFindings(findings);
         await reporter.step(`${job.applicationName} (${job.source.chart})`);
@@ -434,5 +442,6 @@ export async function executeScan(
     // Also on failure: partial results stay, so should the warnings that explain gaps in them
     await flushWarnings();
     await cleanup();
+    await helm.cleanup();
   }
 }

@@ -13,3 +13,4 @@ dist/
 .DS_Store
 /secrets/
 /certs/
+/dev/auth-test/generated/

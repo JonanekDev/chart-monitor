@@ -1,4 +1,7 @@
 import { parse } from 'yaml';
+import { helmRepoCredentials } from '../config/auth.js';
+import { basicAuth } from '../config/credentials.js';
+import { RegistryAuthError } from '../errors.js';
 import { listTags } from '../registry/dockerRegistry.js';
 
 interface HelmRepoIndex {
@@ -7,7 +10,26 @@ interface HelmRepoIndex {
 
 async function fetchClassicRepoVersions(repoUrl: string, chartName: string): Promise<string[]> {
   const indexUrl = `${repoUrl.replace(/\/$/, '')}/index.yaml`;
-  const response = await fetch(indexUrl);
+  const login = helmRepoCredentials(repoUrl);
+  // fetch drops the header if the repo redirects to another host
+  const response = await fetch(
+    indexUrl,
+    login ? { headers: { Authorization: basicAuth(login) } } : {},
+  );
+  if (response.status === 401 || response.status === 403) {
+    throw new RegistryAuthError(
+      `${response.status} from ${new URL(indexUrl).host}: ` +
+        (login
+          ? 'check its login in HELM_REPO_CREDENTIALS'
+          : 'add a login to HELM_REPO_CREDENTIALS'),
+    );
+  }
+  if (response.status === 404 && login) {
+    throw new RegistryAuthError(
+      `404 from ${new URL(indexUrl).host}: not found, or its login in HELM_REPO_CREDENTIALS ` +
+        'lacks permission for it',
+    );
+  }
   if (!response.ok) return [];
 
   const index = parse(await response.text()) as HelmRepoIndex;

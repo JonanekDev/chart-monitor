@@ -1,0 +1,4 @@
+image:
+  repository: auth-registry:5000/team/app
+  # Defaults to the chart's appVersion
+  tag: ''
