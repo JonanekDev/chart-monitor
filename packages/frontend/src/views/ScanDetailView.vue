@@ -4,6 +4,7 @@ import { Icon } from '@iconify/vue';
 import {
   countBySeverity,
   SEVERITIES,
+  type ChartChangelog,
   type ChartFindingDetail,
   type ChartUpgrade,
   type CveFinding,
@@ -148,6 +149,19 @@ function changeSummary(upgrade: ChartUpgrade): string {
     .map(([kind, n]) => `${n} ${n === 1 ? 'resource' : 'resources'} ${kind}`)
     .join(', ');
 }
+
+// Worth seeing without opening the changelog, from every version in the range
+const IMPORTANT_KINDS = ['security', 'removed', 'deprecated'];
+
+function importantChanges(changelog: ChartChangelog) {
+  return changelog.versions
+    .flatMap((v) => v.changes.map((change) => ({ ...change, version: v.version })))
+    .filter((change) => IMPORTANT_KINDS.includes(change.kind))
+    .sort((a, b) => IMPORTANT_KINDS.indexOf(a.kind) - IMPORTANT_KINDS.indexOf(b.kind));
+}
+
+const changeCount = (changelog: ChartChangelog) =>
+  changelog.versions.reduce((sum, v) => sum + v.changes.length, 0);
 
 function vulnerabilitySides(vulns: NonNullable<ChartUpgrade['vulnerabilities']>) {
   return [
@@ -480,6 +494,69 @@ onUnmounted(() => {
                         : 'Vulnerabilities of the new version could not be determined; the skipped items above say why.'
                     }}
                   </p>
+                  <template v-if="group.chart.upgrade.changelog">
+                    <ul
+                      v-if="importantChanges(group.chart.upgrade.changelog).length"
+                      class="changelog-list"
+                    >
+                      <li
+                        v-for="(change, i) in importantChanges(group.chart.upgrade.changelog)"
+                        :key="i"
+                      >
+                        <span :class="['kind-badge', change.kind]">{{ change.kind }}</span>
+                        <span class="mono text-muted">{{ change.version }}</span>
+                        {{ change.description }}
+                      </li>
+                    </ul>
+                    <details v-if="changeCount(group.chart.upgrade.changelog)">
+                      <summary class="changes-summary">
+                        Changelog: {{ changeCount(group.chart.upgrade.changelog) }}
+                        {{
+                          changeCount(group.chart.upgrade.changelog) === 1 ? 'change' : 'changes'
+                        }}
+                      </summary>
+                      <div
+                        v-for="version in group.chart.upgrade.changelog.versions"
+                        :key="version.version"
+                        class="changelog-version"
+                      >
+                        <h4 class="mono">{{ version.version }}</h4>
+                        <p v-if="!version.changes.length" class="text-muted">No changelog</p>
+                        <ul class="changelog-list">
+                          <li v-for="(change, i) in version.changes" :key="i">
+                            <span :class="['kind-badge', change.kind]">{{ change.kind }}</span>
+                            {{ change.description }}
+                            <a
+                              v-for="link in change.links"
+                              :key="link.url"
+                              :href="link.url"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              >{{ link.name }}</a
+                            >
+                          </li>
+                        </ul>
+                      </div>
+                    </details>
+                    <p
+                      v-if="
+                        group.chart.upgrade.changelog.notLoaded ||
+                        group.chart.upgrade.changelog.releasesUrl
+                      "
+                      class="text-muted"
+                    >
+                      <template v-if="group.chart.upgrade.changelog.notLoaded">
+                        +{{ group.chart.upgrade.changelog.notLoaded }} versions not loaded
+                      </template>
+                      <a
+                        v-if="group.chart.upgrade.changelog.releasesUrl"
+                        :href="group.chart.upgrade.changelog.releasesUrl"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        >Release notes on GitHub</a
+                      >
+                    </p>
+                  </template>
                 </div>
                 <p v-if="group.images.length === 0" class="text-muted">
                   {{ imagesPending ? 'Finding images…' : 'No images found for this chart.' }}
@@ -819,6 +896,45 @@ progress {
 .vendor-advisory {
   color: var(--color-text-muted);
   font-style: italic;
+}
+.changelog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+  font-size: 0.875rem;
+}
+.changelog-list a {
+  margin-left: var(--space-1);
+}
+.changelog-version {
+  margin: var(--space-2) 0 0 var(--space-4);
+}
+.changelog-version h4 {
+  font-size: 0.875rem;
+  margin-bottom: var(--space-1);
+}
+.kind-badge {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.75rem;
+  padding: 0 var(--space-1);
+  margin-right: var(--space-1);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg);
+  color: var(--color-text-muted);
+}
+.kind-badge.security {
+  color: #ef4444;
+}
+.kind-badge.removed {
+  color: #f97316;
+}
+.kind-badge.deprecated {
+  color: #eab308;
+}
+.kind-badge.added {
+  color: var(--color-primary);
 }
 .vuln-side {
   margin-right: var(--space-3);

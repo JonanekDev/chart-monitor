@@ -44,6 +44,28 @@ export const vulnerabilityChangeSchema = z.object({
 
 export type VulnerabilityChange = z.infer<typeof vulnerabilityChangeSchema>;
 
+/** One item of a chart version's `artifacthub.io/changes` annotation */
+export const changelogEntrySchema = z.object({
+  /** added | changed | deprecated | removed | fixed | security */
+  kind: z.string(),
+  description: z.string(),
+  links: z.array(z.object({ name: z.string(), url: z.string() })),
+});
+
+export type ChangelogEntry = z.infer<typeof changelogEntrySchema>;
+
+/** Changes of every version after the current one up to the latest */
+export const chartChangelogSchema = z.object({
+  /** Newest first; `changes` is empty when the chart publishes none */
+  versions: z.array(z.object({ version: z.string(), changes: z.array(changelogEntrySchema) })),
+  /** OCI versions over the load limit (each needs its own download) */
+  notLoaded: z.number().int(),
+  /** GitHub releases of the chart's source repo, filtered to the latest version */
+  releasesUrl: z.string().nullable(),
+});
+
+export type ChartChangelog = z.infer<typeof chartChangelogSchema>;
+
 /** What upgrading an outdated chart to its latest version would change, with the app's values */
 export const chartUpgradeSchema = z.object({
   /** Keys the app sets that the new chart's values.yaml no longer has (silently ignored) */
@@ -59,6 +81,8 @@ export const chartUpgradeSchema = z.object({
       introduced: z.array(vulnerabilityChangeSchema),
     })
     .nullable(),
+  /** null when it couldn't be read; missing in upgrades stored before changelogs existed */
+  changelog: chartChangelogSchema.nullable(),
 });
 
 export type ChartUpgrade = z.infer<typeof chartUpgradeSchema>;

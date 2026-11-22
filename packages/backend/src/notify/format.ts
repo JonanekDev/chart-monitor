@@ -51,6 +51,24 @@ function groupSection(out: string[], heading: string, groups: VulnerabilityGroup
   if (more > 0) out.push(`…and ${more} more`);
 }
 
+/** Security items in full; removed/deprecated as counts with the link; the rest is in the UI */
+function changelogLines({ changelog }: ChartUpdate): string[] {
+  if (!changelog) return [];
+  const all = changelog.versions.flatMap((v) =>
+    v.changes.map((c) => ({ ...c, version: v.version })),
+  );
+  const out = all
+    .filter((c) => c.kind === 'security')
+    .map((c) => `  ⚠ security (${c.version}): ${c.description.slice(0, 200)}`);
+  const counts = (['removed', 'deprecated'] as const)
+    .map((kind) => [kind, all.filter((c) => c.kind === kind).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([kind, n]) => `${n} ${kind}`);
+  const summary = [counts.join(', '), changelog.releasesUrl].filter(Boolean).join(' · ');
+  if (summary) out.push(`  changelog: ${summary}`);
+  return out;
+}
+
 function lines(content: NotificationContent): string[] {
   const out: string[] = [];
   if (content.error) out.push(`\`${content.error.slice(0, 500)}\``);
@@ -75,6 +93,7 @@ function lines(content: NotificationContent): string[] {
         `• ${u.chartName} ${u.currentVersion} → ${u.latestVersion} (${u.applicationName})${describeChange(u)}`,
       );
       for (const warning of u.warnings) out.push(`  ⚠ ${warning}`);
+      out.push(...changelogLines(u));
     }
     const more = content.chartUpdates.length - MAX_LISTED;
     if (more > 0) out.push(`…and ${more} more`);

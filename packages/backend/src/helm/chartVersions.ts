@@ -5,10 +5,20 @@ import { RegistryAuthError } from '../errors.js';
 import { listTags } from '../registry/dockerRegistry.js';
 
 interface HelmRepoIndex {
-  entries?: Record<string, { version: string }[]>;
+  entries?: Record<string, { version: string; annotations?: Record<string, string> }[]>;
 }
 
-async function fetchClassicRepoVersions(repoUrl: string, chartName: string): Promise<string[]> {
+export interface PublishedVersion {
+  version: string;
+  /** `artifacthub.io/changes`, which a classic repo's index.yaml carries for every version; OCI
+   * repos only list tags */
+  changes?: string;
+}
+
+async function fetchClassicRepoVersions(
+  repoUrl: string,
+  chartName: string,
+): Promise<PublishedVersion[]> {
   const indexUrl = `${repoUrl.replace(/\/$/, '')}/index.yaml`;
   const login = helmRepoCredentials(repoUrl);
   // fetch drops the header if the repo redirects to another host
@@ -33,7 +43,10 @@ async function fetchClassicRepoVersions(repoUrl: string, chartName: string): Pro
   if (!response.ok) return [];
 
   const index = parse(await response.text()) as HelmRepoIndex;
-  return (index.entries?.[chartName] ?? []).map((entry) => entry.version);
+  return (index.entries?.[chartName] ?? []).map((entry) => ({
+    version: entry.version,
+    changes: entry.annotations?.['artifacthub.io/changes'],
+  }));
 }
 
 function parseOciRef(repoUrl: string): { registryHost: string; repoPath: string } {
@@ -49,10 +62,14 @@ export function normalizeChartRepoUrl(repoUrl: string): string {
 
 /** Fetches all published versions for a chart, whether it lives in a classic Helm repo
  * (index.yaml) or an OCI registry. */
-export async function fetchChartVersions(repoUrl: string, chartName: string): Promise<string[]> {
+export async function fetchChartVersions(
+  repoUrl: string,
+  chartName: string,
+): Promise<PublishedVersion[]> {
   if (repoUrl.startsWith('oci://')) {
     const { registryHost, repoPath } = parseOciRef(repoUrl);
-    return listTags(registryHost, `${repoPath}/${chartName}`);
+    const tags = await listTags(registryHost, `${repoPath}/${chartName}`);
+    return tags.map((version) => ({ version }));
   }
   return fetchClassicRepoVersions(repoUrl, chartName);
 }

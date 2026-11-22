@@ -4,6 +4,7 @@ import {
   type CveSeverityValue,
   ScanState,
   VersionStatus,
+  type ChangelogEntry,
   type ChartUpgrade,
   type ImageFinding,
   type LatestTagCheck,
@@ -16,6 +17,7 @@ import type { Monitor, Prisma, PrismaClient, Scan } from '../generated/prisma/cl
 import { redactSecrets } from '../config/auth.js';
 import { ScanNotFoundError } from '../errors.js';
 import { executeScan, type ScanReporter } from './runScan.js';
+import type { ChangelogCache } from '../helm/changelog.js';
 import { notifyAfterScan } from '../notify/notifyAfterScan.js';
 
 type ScanWithFindings = Prisma.ScanGetPayload<{
@@ -168,6 +170,27 @@ function databaseReporter(prisma: PrismaClient, scanId: string): ScanReporter {
   };
 }
 
+/** Shared by all scans and monitors: a chart version's changelog never changes */
+function databaseChangelogCache(prisma: PrismaClient): ChangelogCache {
+  return {
+    async get(keys) {
+      const rows = await prisma.changelogCache.findMany({ where: { key: { in: keys } } });
+      return new Map(rows.map((row) => [row.key, JSON.parse(row.changes) as ChangelogEntry[]]));
+    },
+    async set(entries) {
+      await prisma.$transaction(
+        [...entries].map(([key, changes]) =>
+          prisma.changelogCache.upsert({
+            where: { key },
+            create: { key, changes: JSON.stringify(changes) },
+            update: {},
+          }),
+        ),
+      );
+    },
+  };
+}
+
 async function runScan(prisma: PrismaClient, scan: Scan): Promise<void> {
   await prisma.scan.update({ where: { id: scan.id }, data: { state: ScanState.RUNNING } });
 
@@ -179,6 +202,7 @@ async function runScan(prisma: PrismaClient, scan: Scan): Promise<void> {
         ref: scan.ref ?? undefined,
       },
       databaseReporter(prisma, scan.id),
+      databaseChangelogCache(prisma),
     );
     await prisma.scan.update({
       where: { id: scan.id },

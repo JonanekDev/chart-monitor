@@ -19,7 +19,7 @@ vi.mock('../git/repoSnapshot.js', async (importOriginal) => ({
 }));
 vi.mock('../helm/chartVersions.js', () => ({
   normalizeChartRepoUrl: (url: string) => url,
-  fetchChartVersions: async () => ['1.0.0', '2.0.0'],
+  fetchChartVersions: async () => [{ version: '1.0.0' }, { version: '2.0.0' }],
 }));
 const deployment = (tag: string, app: string) => ({
   kind: 'Deployment',
@@ -123,6 +123,7 @@ describe('classifyOutdatedImages', () => {
     valuesDocuments: ['app: { tag: 1.0 }'],
     // renderChart is mocked, so the session is never used
     helm: null as never,
+    changelogCache: null as never,
   };
   const finding = (image: string, currentTag: string, latestTag: string) => ({
     applicationName: 'app',

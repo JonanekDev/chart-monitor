@@ -123,6 +123,7 @@ describe('buildNotification', () => {
         latestVersion: '1.20.5',
         warnings: [],
         vulnerabilities: null,
+        changelog: null,
       },
     ]);
     expect(buildNotification(rules, now, now)).toBeNull(); // same latest version again
@@ -137,6 +138,7 @@ describe('buildNotification', () => {
             manifestChanges: [],
             renderError: null,
             vulnerabilities: null,
+            changelog: null,
           },
         },
       ],
@@ -167,10 +169,51 @@ describe('buildNotification', () => {
             ],
             renderError: null,
             vulnerabilities: null,
+            changelog: null,
           },
         },
       ],
     );
+    const withChangelog = scan(
+      [],
+      [
+        {
+          ...chart('1.20.5'),
+          upgrade: {
+            removedValues: [],
+            manifestChanges: [],
+            renderError: null,
+            vulnerabilities: null,
+            changelog: {
+              versions: [
+                {
+                  version: '1.20.5',
+                  changes: [
+                    { kind: 'security', description: 'Fix CVE-1 in the agent', links: [] },
+                    { kind: 'removed', description: 'Drop the old flag', links: [] },
+                  ],
+                },
+                {
+                  version: '1.20.4',
+                  changes: [{ kind: 'deprecated', description: 'x', links: [] }],
+                },
+              ],
+              notLoaded: 0,
+              releasesUrl: 'https://github.com/cilium/cilium/releases?q=1.20.5&expanded=true',
+            },
+          },
+        },
+      ],
+    );
+    const content = buildNotification(rules, withChangelog, before)!;
+    const text = toWebhookPayload(content, { repo: 'o/r', scanUrl: null }).text;
+    expect(text).toContain('⚠ security (1.20.5): Fix CVE-1 in the agent');
+    expect(text).toContain(
+      'changelog: 1 removed, 1 deprecated · https://github.com/cilium/cilium/releases?q=1.20.5&expanded=true',
+    );
+    expect(text).not.toContain('Drop the old flag');
+    // The JSON webhook gets the whole changelog
+    expect(content.chartUpdates[0]?.changelog?.versions).toHaveLength(2);
     expect(buildNotification(rules, rbac, before)!.chartUpdates[0]?.warnings).toEqual([
       'ClusterRole op: RBAC rules change, review the permissions',
       'RoleBinding ops/ci: new, review the permissions it grants',
@@ -199,6 +242,7 @@ describe('buildNotification', () => {
               manifestChanges: [],
               renderError: null,
               vulnerabilities: { fixed, introduced: [change('CVE-9', 'HIGH')] },
+              changelog: null,
             },
           },
         ],

@@ -143,6 +143,14 @@ model CveFinding {
   @@index([scanId])
 }
 
+/// Chart versions are immutable, so their changelog is fetched once: repo|chart|version → JSON
+/// ChangelogEntry[]
+model ChangelogCache {
+  key       String   @id
+  changes   String
+  createdAt DateTime @default(now())
+}
+
 /// Small key/value store for app-generated settings (e.g. the session signing secret)
 model AppSetting {
   key   String @id

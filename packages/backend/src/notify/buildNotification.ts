@@ -1,6 +1,7 @@
 import {
   countBySeverity,
   severityRank,
+  type ChartChangelog,
   type ChartUpdateMode,
   type ChartUpgrade,
   type CveSeverityValue,
@@ -61,6 +62,9 @@ export interface ChartUpdate {
   /** CVEs from the monitor's minimum severity up that upgrading gets rid of / brings in, by
    * severity; null when unknown */
   vulnerabilities: { fixed: SeverityCounts; introduced: SeverityCounts } | null;
+  /** All versions up to the latest (the text shows security items, removed/deprecated counts and
+   * the link; JSON webhooks get all of it) */
+  changelog: ChartChangelog | null;
 }
 
 /** All new occurrences of one vulnerability id */
@@ -242,6 +246,7 @@ function availableUpdates(scan: ScanSnapshot, rules: NotifyRules): Map<string, C
         currentVersion: c.currentVersion,
         latestVersion: c.latestVersion!,
         warnings: upgradeWarnings(c.upgrade),
+        changelog: c.upgrade?.changelog ?? null,
         vulnerabilities: vulns
           ? {
               fixed: countFrom(vulns.fixed, rules.minSeverity),

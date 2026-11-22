@@ -34,6 +34,20 @@ export function findLatestVersion(versions: string[], includePrereleases = false
   return valid.reduce((latest, v) => (isGreaterThan(v, latest) ? v : latest));
 }
 
+/** Versions after `current` up to and including `latest`, newest first, skipping pre-releases
+ * unless asked (like findLatestVersion) */
+export function versionsBetween(
+  versions: string[],
+  current: string,
+  latest: string,
+  includePrereleases = false,
+): string[] {
+  return versions
+    .filter((v) => coerceVersion(v) && (includePrereleases || semver.prerelease(v) === null))
+    .filter((v) => isGreaterThan(v, current) && !isGreaterThan(v, latest))
+    .sort((a, b) => (isGreaterThan(a, b) ? -1 : isGreaterThan(b, a) ? 1 : 0));
+}
+
 export function compareVersions(current: string, latest: string | null): VersionStatusValue {
   if (!latest) return VersionStatus.UNKNOWN;
 

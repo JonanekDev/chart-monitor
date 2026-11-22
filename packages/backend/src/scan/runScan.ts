@@ -11,9 +11,19 @@ import {
 } from '@chart-monitor/shared';
 import { resolveApplicationSets } from '../argocd/findApplicationSets.js';
 import { withWarningPrefix, type ApplicationSource, type ScanContext } from '../argocd/types.js';
-import { fetchChartVersions, normalizeChartRepoUrl } from '../helm/chartVersions.js';
-import { compareVersions, findLatestVersion, isSureUpgrade } from '../helm/versionCompare.js';
-import { findImages, HelmSession, pullChart, renderChart } from '../helm/renderChart.js';
+import {
+  fetchChartVersions,
+  normalizeChartRepoUrl,
+  type PublishedVersion,
+} from '../helm/chartVersions.js';
+import {
+  compareVersions,
+  findLatestVersion,
+  isSureUpgrade,
+  versionsBetween,
+} from '../helm/versionCompare.js';
+import { findImages, HelmSession, pullChart, renderChart, showChart } from '../helm/renderChart.js';
+import { buildChangelog, memoryChangelogCache, type ChangelogCache } from '../helm/changelog.js';
 import { diffManifests, diffVulnerabilities, removedValueKeys } from '../helm/upgradeCheck.js';
 import { collectValuesDocuments } from '../argocd/valueFiles.js';
 import { expandUmbrellaChart, type ChartToScan } from '../argocd/umbrellaChart.js';
@@ -43,19 +53,27 @@ function describeError(error: unknown): string {
 
 /** A missing version/tag list stays quiet (non-semver tags, registries without a tag list), a
  * refused login is worth a warning */
-const warnOnAuthError = (warn: (message: string) => void) => (error: unknown) => {
-  if (error instanceof RegistryAuthError) warn(error.message);
-  return [] as string[];
-};
+const warnOnAuthError =
+  (warn: (message: string) => void) =>
+  (error: unknown): never[] => {
+    if (error instanceof RegistryAuthError) warn(error.message);
+    return [];
+  };
 
-async function resolveChartFinding(job: ChartJob): Promise<ChartFinding> {
+/** The finding, and every published version (the changelog reads them later) */
+async function resolveChartFinding(
+  job: ChartJob,
+): Promise<{ finding: ChartFinding; published: PublishedVersion[] }> {
   const { applicationName, applicationSetName, source } = job;
-  const versions = await fetchChartVersions(source.repoURL, source.chart).catch(
+  const published = await fetchChartVersions(source.repoURL, source.chart).catch(
     warnOnAuthError(job.ctx.warn),
   );
-  const latestVersion = findLatestVersion(versions, env.INCLUDE_PRERELEASES);
+  const latestVersion = findLatestVersion(
+    published.map((p) => p.version),
+    env.INCLUDE_PRERELEASES,
+  );
 
-  return {
+  const finding: ChartFinding = {
     applicationName,
     applicationSetName,
     chartName: source.chart,
@@ -65,6 +83,7 @@ async function resolveChartFinding(job: ChartJob): Promise<ChartFinding> {
     status: compareVersions(source.targetRevision, latestVersion),
     note: latestVersion ? null : 'Could not determine published chart versions',
   };
+  return { finding, published };
 }
 
 async function resolveImageFindings(job: ChartJob, images: string[]): Promise<ImageFinding[]> {
@@ -170,6 +189,7 @@ async function checkUpgrade(
   job: ChartJob,
   manifests: unknown[],
   latestVersion: string,
+  published: PublishedVersion[],
 ): Promise<{ upgrade: ChartUpgrade; latestImages: string[] | null }> {
   const latest = { ...job.source, targetRevision: latestVersion };
   const [current, upgraded] = await Promise.all([
@@ -182,6 +202,27 @@ async function checkUpgrade(
     current.defaults,
     upgraded.defaults,
   );
+  const { source } = job;
+  const changelog = await buildChangelog({
+    cacheKey: (version) => `${source.repoURL}|${source.chart}|${version}`,
+    cache: job.changelogCache,
+    versions: versionsBetween(
+      published.map((p) => p.version),
+      source.targetRevision,
+      latestVersion,
+      env.INCLUDE_PRERELEASES,
+    ),
+    currentVersion: source.targetRevision,
+    latestVersion,
+    latestMetadata: upgraded.metadata,
+    indexChanges: source.repoURL.startsWith('oci://')
+      ? null
+      : new Map(published.map((p) => [p.version, p.changes])),
+    loadMetadata: (version) => showChart(job.helm, { ...source, targetRevision: version }),
+  }).catch((error) => {
+    job.ctx.warn(`changelog up to ${latestVersion} could not be read: ${describeError(error)}`);
+    return null;
+  });
   try {
     const latestManifests = await renderChart(job.helm, latest, job.valuesDocuments);
     return {
@@ -190,6 +231,7 @@ async function checkUpgrade(
         manifestChanges: diffManifests(manifests, latestManifests),
         renderError: null,
         vulnerabilities: null,
+        changelog,
       },
       latestImages: findImages(latestManifests),
     };
@@ -200,6 +242,7 @@ async function checkUpgrade(
         manifestChanges: [],
         renderError: describeError(error),
         vulnerabilities: null,
+        changelog,
       },
       latestImages: null,
     };
@@ -278,11 +321,13 @@ interface ChartJob {
   source: ApplicationSource & { chart: string; targetRevision: string };
   valuesDocuments: string[];
   helm: HelmSession;
+  changelogCache: ChangelogCache;
 }
 
 export async function executeScan(
   input: { repoUrl: string; searchPath?: string; ref?: string },
   reporter: ScanReporter,
+  changelogCache: ChangelogCache = memoryChangelogCache(),
 ): Promise<void> {
   const warnings = new Set<string>();
   const { openRepo, cleanup } = createRepoOpener({
@@ -323,6 +368,7 @@ export async function executeScan(
           source: source as ChartJob['source'],
           valuesDocuments,
           helm,
+          changelogCache,
         });
       }
     }
@@ -330,12 +376,13 @@ export async function executeScan(
 
     // Cheap step first, so chart versions are visible long before the slow image scans finish
     await reporter.phase(ScanPhase.CHART_VERSIONS, jobs.length);
-    const chartFindings = await mapWithConcurrency(jobs, CHART_CONCURRENCY, async (job) => {
-      const finding = await resolveChartFinding(job);
-      await reporter.chartFinding(finding);
+    const chartResults = await mapWithConcurrency(jobs, CHART_CONCURRENCY, async (job) => {
+      const result = await resolveChartFinding(job);
+      await reporter.chartFinding(result.finding);
       await reporter.step(`${job.applicationName} (${job.source.chart})`);
-      return finding;
+      return result;
     });
+    const chartFindings = chartResults.map((r) => r.finding);
 
     await reporter.phase(ScanPhase.IMAGES, jobs.length);
     const imageJobs = jobs.map((job, i) => ({
@@ -365,20 +412,25 @@ export async function executeScan(
     const upgrades = jobs.flatMap((job, i) => {
       const { status, latestVersion } = chartFindings[i] as ChartFinding;
       const { manifests, images } = appImages[i]!;
+      const { published } = chartResults[i]!;
       return status === VersionStatus.OUTDATED && latestVersion && manifests
-        ? [{ job, manifests, images, latestVersion }]
+        ? [{ job, manifests, images, latestVersion, published }]
         : [];
     });
     await reporter.phase(ScanPhase.UPGRADES, upgrades.length);
     const checked = await mapWithConcurrency(
       upgrades,
       CHART_CONCURRENCY,
-      async ({ job, manifests, images, latestVersion }) => {
+      async ({ job, manifests, images, latestVersion, published }) => {
         const chart = { applicationName: job.applicationName, chartName: job.source.chart };
-        const result = await checkUpgrade(job, manifests, latestVersion).catch((error) => {
-          job.ctx.warn(`upgrade to ${latestVersion} could not be checked: ${describeError(error)}`);
-          return null;
-        });
+        const result = await checkUpgrade(job, manifests, latestVersion, published).catch(
+          (error) => {
+            job.ctx.warn(
+              `upgrade to ${latestVersion} could not be checked: ${describeError(error)}`,
+            );
+            return null;
+          },
+        );
         if (result) await reporter.chartUpgrade(chart, result.upgrade);
         await reporter.step(`${job.applicationName} (${job.source.chart} ${latestVersion})`);
         return result && { ...result, chart, images };

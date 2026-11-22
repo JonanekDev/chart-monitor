@@ -246,6 +246,23 @@ async function chartDefaults(dir: string): Promise<PulledChart> {
   return { defaults, metadata };
 }
 
+/** Just the chart's Chart.yaml (`helm show chart`), for versions that don't need a full pull */
+export async function showChart(
+  helm: HelmSession,
+  source: ApplicationSource,
+): Promise<ChartMetadata> {
+  try {
+    const args = ['show', 'chart', ...(await helm.chartArgs(source))];
+    const { stdout } = await execFileAsync('helm', args, { env: HELM_ENV });
+    return (parse(stdout) ?? {}) as ChartMetadata;
+  } catch (cause) {
+    throw new HelmResolutionError(
+      `helm show chart failed for chart "${source.chart}" @ ${source.targetRevision}`,
+      cause,
+    );
+  }
+}
+
 /** Downloads the chart at `source.targetRevision` (`helm pull --untar`): its default values,
  * including the subcharts' (which `helm show values` leaves out), and its Chart.yaml */
 export async function pullChart(
