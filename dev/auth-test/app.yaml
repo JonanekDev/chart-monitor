@@ -11,3 +11,12 @@ services:
       DOCKER_CONFIG: /auth-test/docker
     volumes:
       - ./dev/auth-test/generated:/auth-test:ro
+    # GIT_CREDENTIALS holds a token the seed creates in Forgejo, so it's read once the seed is done
+    depends_on:
+      auth-test-seed:
+        condition: service_completed_successfully
+    command:
+      - sh
+      - -c
+      - set -a && . /auth-test/git.env && set +a &&
+        pnpm --filter @chart-monitor/backend run db:deploy && exec node packages/backend/dist/index.js

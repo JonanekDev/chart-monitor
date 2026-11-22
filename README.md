@@ -131,8 +131,9 @@ sh dev/auth-test/setup.sh   # throwaway CA, certificates and password into dev/a
 docker compose -f docker-compose.yml -f dev/auth-test/app.yaml --profile auth-test up -d --build
 ```
 
-Then add a monitor for a repo with an Application using `https://auth-chartmuseum:8080` or
-`auth-registry:5000/charts` (chart `auth-test-app`, version `0.1.0`).
+Then add a monitor for `https://auth-git:3000/testuser/gitops.git`, a private repo in Forgejo (the
+app gets a token for it in `GIT_CREDENTIALS`). Its Applications (`dev/auth-test/gitops`) use the
+chart from ChartMuseum and as OCI, one of them with the image tag set in its values.
 
 ## Security
 

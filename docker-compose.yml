@@ -60,13 +60,37 @@ services:
     volumes:
       - ./dev/auth-test/generated:/auth-test:ro
 
+  # Forgejo with a private GitOps repo using the private charts (the seed creates it):
+  # add https://auth-git:3000/testuser/gitops.git
+  auth-git:
+    image: codeberg.org/forgejo/forgejo:11.0.7
+    profiles: [auth-test]
+    entrypoint: sh /work/forgejo.sh
+    environment:
+      FORGEJO__security__INSTALL_LOCK: 'true'
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__server__PROTOCOL: https
+      FORGEJO__server__DOMAIN: auth-git
+      FORGEJO__server__HTTP_PORT: 3000
+      FORGEJO__server__ROOT_URL: https://auth-git:3000/
+      FORGEJO__server__CERT_FILE: /auth-test/server.crt
+      FORGEJO__server__KEY_FILE: /auth-test/server.key
+      FORGEJO__server__DISABLE_SSH: 'true'
+      FORGEJO__service__DISABLE_REGISTRATION: 'true'
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW: 'true'
+      FORGEJO__log__LEVEL: Warn
+    volumes:
+      - ./dev/auth-test:/work:ro
+      - ./dev/auth-test/generated:/auth-test:ro
+
   auth-test-seed:
     image: alpine:3.20
     profiles: [auth-test]
     command: sh /work/seed.sh
-    depends_on: [auth-registry, auth-chartmuseum]
+    depends_on: [auth-registry, auth-chartmuseum, auth-git]
     volumes:
       - ./dev/auth-test:/work:ro
+      - ./dev/auth-test/generated/git.env:/work/generated/git.env
 
 volumes:
   backend_data:

@@ -1,8 +1,9 @@
 #!/bin/sh
 # Runs in the auth-test-seed container: pushes a "private" app image (two tags) to the test
-# registry and a chart using it (two versions) to ChartMuseum and, as OCI, to the registry.
+# registry and a chart using it (two versions) to ChartMuseum and, as OCI, to the registry; then a
+# private GitOps repo to Forgejo, and a read-only token for it into generated/git.env.
 set -eu
-apk add -q --no-cache ca-certificates curl helm skopeo
+apk add -q --no-cache ca-certificates curl git helm skopeo
 cp /work/generated/ca.crt /usr/local/share/ca-certificates/auth-test.crt
 update-ca-certificates 2>/dev/null
 
@@ -26,4 +27,25 @@ for chart in /tmp/charts/*.tgz; do
   echo
   helm push "$chart" oci://auth-registry:5000/charts
 done
+forgejo=https://auth-git:3000
+until curl -fsS -o /dev/null -u "$user:$password" "$forgejo/api/v1/user"; do sleep 2; done
+status=$(curl -sS -o /dev/null -w '%{http_code}' -u "$user:$password" -H 'Content-Type: application/json' \
+  -d '{"name":"gitops","private":true}' "$forgejo/api/v1/user/repos")
+case "$status" in 201 | 409) ;; *) echo "creating the repo failed: $status" >&2; exit 1 ;; esac
+
+cp -r /work/gitops /tmp/gitops
+cd /tmp/gitops
+git init -q -b main
+git add .
+git -c user.name=auth-test -c user.email=auth-test@auth-test.invalid commit -qm 'auth-test applications'
+git push -qf "https://$user:$password@auth-git:3000/$user/gitops.git" main
+cd /
+
+# Tokens can't be read back: a new one per run
+token=$(curl -fsS -u "$user:$password" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"chart-monitor-$(date +%s)\",\"scopes\":[\"read:repository\"]}" \
+  "$forgejo/api/v1/users/$user/tokens" | sed -n 's/.*"sha1":"\([^"]*\)".*/\1/p')
+[ -n "$token" ] || { echo 'creating the token failed' >&2; exit 1; }
+printf 'GIT_CREDENTIALS=https://%s:%s@auth-git:3000\n' "$user" "$token" > /work/generated/git.env
+
 echo 'Seeded'

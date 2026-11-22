@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata: { name: private-classic }
+spec:
+  source: { repoURL: 'https://auth-chartmuseum:8080', chart: auth-test-app, targetRevision: 0.1.0 }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata: { name: private-oci }
+spec:
+  # ArgoCD style: an OCI chart repo without a scheme
+  source: { repoURL: 'auth-registry:5000/charts', chart: auth-test-app, targetRevision: 0.1.0 }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata: { name: private-values }
+spec:
+  source:
+    repoURL: 'https://auth-chartmuseum:8080'
+    chart: auth-test-app
+    targetRevision: 0.2.0
+    helm:
+      valuesObject: { image: { tag: 1.0.0 } }
