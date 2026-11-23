@@ -77,6 +77,17 @@ const envSchema = z.object({
       if (!value || value === 'false') return false;
       return value === 'true' ? true : value;
     }),
+  /** Images scanned by trivy at once. Each pulls image layers (unless the trivy server has them
+   * cached) and matches them against the vulnerability DB: raise it on a strong machine, lower it
+   * on a small one or when a registry rate-limits */
+  SCAN_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(8),
+  /** How long trivy may take for one image (a Go duration, e.g. 5m, 15m). Huge images (media
+   * files, big layers) can need more on their first scan; once done, layers are cached */
+  TRIVY_TIMEOUT: z
+    .string()
+    .trim()
+    .regex(/^\d+(ms|s|m|h)$/, 'TRIVY_TIMEOUT must be a duration like 5m or 900s')
+    .default('5m'),
   /** Scans kept per monitor; older ones are deleted after each scan */
   SCAN_RETENTION: z.coerce.number().int().min(1).default(10),
 });

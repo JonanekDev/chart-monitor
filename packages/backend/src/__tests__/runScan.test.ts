@@ -124,6 +124,7 @@ describe('classifyOutdatedImages', () => {
     // renderChart is mocked, so the session is never used
     helm: null as never,
     changelogCache: null as never,
+    repoIndexes: new Map(),
   };
   const finding = (image: string, currentTag: string, latestTag: string) => ({
     applicationName: 'app',

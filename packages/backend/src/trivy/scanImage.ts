@@ -36,7 +36,21 @@ function normalizeSeverity(severity: string): CveSeverityValue {
 
 /** Scans a container image for known vulnerabilities via a shared `trivy server` (avoids each scan
  * re-downloading the vulnerability database). */
+// An image trivy can't finish in TRIVY_TIMEOUT (e.g. one with gigabytes of media files to walk)
+// fails the same way every time, and a failed analysis isn't cached: without this, every scan
+// would wait the full timeout for it again.
+// ponytail: per-process memory, a restart tries again
+const TIMED_OUT_RETRY_MS = 24 * 60 * 60 * 1000;
+const timedOut = new Map<string, number>();
+
 export async function scanImageForVulnerabilities(image: string): Promise<ImageVulnerability[]> {
+  const since = timedOut.get(image);
+  if (since && Date.now() - since < TIMED_OUT_RETRY_MS) {
+    throw new TrivyScanError(
+      `Trivy scan of "${image}" skipped: it took over ${env.TRIVY_TIMEOUT} in a scan of the last ` +
+        '24 hours (a larger TRIVY_TIMEOUT lets it finish once, after that it is cached)',
+    );
+  }
   try {
     const { stdout } = await execFileAsync(
       'trivy',
@@ -49,6 +63,8 @@ export async function scanImageForVulnerabilities(image: string): Promise<ImageV
         '--format',
         'json',
         '--quiet',
+        '--timeout',
+        env.TRIVY_TIMEOUT,
         image,
       ],
       { maxBuffer: 1024 * 1024 * 50 },
@@ -66,6 +82,8 @@ export async function scanImageForVulnerabilities(image: string): Promise<ImageV
       })),
     );
   } catch (cause) {
+    const stderr = (cause as { stderr?: string }).stderr ?? '';
+    if (stderr.includes('context deadline exceeded')) timedOut.set(image, Date.now());
     throw new TrivyScanError(`Trivy scan failed for image "${image}"`, cause);
   }
 }

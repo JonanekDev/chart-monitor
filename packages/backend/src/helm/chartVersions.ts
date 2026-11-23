@@ -15,10 +15,27 @@ export interface PublishedVersion {
   changes?: string;
 }
 
+/** index.yaml per repo URL, for one scan: a repo serving many charts is fetched once */
+export type RepoIndexCache = Map<string, Promise<HelmRepoIndex | null>>;
+
 async function fetchClassicRepoVersions(
   repoUrl: string,
   chartName: string,
+  indexes: RepoIndexCache,
 ): Promise<PublishedVersion[]> {
+  let index = indexes.get(repoUrl);
+  if (!index) {
+    index = fetchRepoIndex(repoUrl);
+    indexes.set(repoUrl, index);
+  }
+  return ((await index)?.entries?.[chartName] ?? []).map((entry) => ({
+    version: entry.version,
+    changes: entry.annotations?.['artifacthub.io/changes'],
+  }));
+}
+
+/** null when the repo answers with an error other than a refused login */
+async function fetchRepoIndex(repoUrl: string): Promise<HelmRepoIndex | null> {
   const indexUrl = `${repoUrl.replace(/\/$/, '')}/index.yaml`;
   const login = helmRepoCredentials(repoUrl);
   // fetch drops the header if the repo redirects to another host
@@ -40,13 +57,8 @@ async function fetchClassicRepoVersions(
         'lacks permission for it',
     );
   }
-  if (!response.ok) return [];
-
-  const index = parse(await response.text()) as HelmRepoIndex;
-  return (index.entries?.[chartName] ?? []).map((entry) => ({
-    version: entry.version,
-    changes: entry.annotations?.['artifacthub.io/changes'],
-  }));
+  if (!response.ok) return null;
+  return parse(await response.text()) as HelmRepoIndex;
 }
 
 function parseOciRef(repoUrl: string): { registryHost: string; repoPath: string } {
@@ -65,11 +77,12 @@ export function normalizeChartRepoUrl(repoUrl: string): string {
 export async function fetchChartVersions(
   repoUrl: string,
   chartName: string,
+  indexes: RepoIndexCache = new Map(),
 ): Promise<PublishedVersion[]> {
   if (repoUrl.startsWith('oci://')) {
     const { registryHost, repoPath } = parseOciRef(repoUrl);
     const tags = await listTags(registryHost, `${repoPath}/${chartName}`);
     return tags.map((version) => ({ version }));
   }
-  return fetchClassicRepoVersions(repoUrl, chartName);
+  return fetchClassicRepoVersions(repoUrl, chartName, indexes);
 }

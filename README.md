@@ -29,20 +29,22 @@ Open http://localhost:3000 and log in with your password.
 
 All settings go in `.env` in the repo root.
 
-| Variable                | Purpose                                                                                              |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- |
-| `ADMIN_PASSWORD_HASH`   | **Required.** bcrypt hash of the login password, in single quotes (see below).                       |
-| `AUTH_DISABLED`         | `true` turns the login off, for setups with SSO in front of the app (default `false`).               |
-| `GITHUB_TOKEN`          | Private GitHub repos. Fine-grained token, _Contents: Read-only_.                                     |
-| `GIT_CREDENTIALS`       | Private repos on other hosts, comma-separated `https://user:token@host` (see below).                 |
-| `HELM_REPO_CREDENTIALS` | Private Helm repos (classic), comma-separated `https://user:password@host/path`.                     |
-| `DOCKER_CONFIG`         | Private registries: directory with a Docker `config.json` (see below).                               |
-| `TZ`                    | Time zone for scan schedules, e.g. `Europe/Prague` (default `UTC`).                                  |
-| `SCAN_RETENTION`        | Scans kept per monitor; older ones are deleted (default `10`).                                       |
-| `PUBLIC_URL`            | Where the app is reachable, for links in notifications (e.g. `https://cm.example.com`).              |
-| `PORT`                  | Port the app is published on (default `3000`).                                                       |
-| `INCLUDE_PRERELEASES`   | Also treat pre-release versions (`1.2.0-rc.1`) as updates (default `false`).                         |
-| `TRUST_PROXY`           | Behind a reverse proxy: its IP or CIDR (comma-separated), so the login rate limit sees real clients. |
+| Variable                | Purpose                                                                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADMIN_PASSWORD_HASH`   | **Required.** bcrypt hash of the login password, in single quotes (see below).                                                          |
+| `AUTH_DISABLED`         | `true` turns the login off, for setups with SSO in front of the app (default `false`).                                                  |
+| `GITHUB_TOKEN`          | Private GitHub repos. Fine-grained token, _Contents: Read-only_.                                                                        |
+| `GIT_CREDENTIALS`       | Private repos on other hosts, comma-separated `https://user:token@host` (see below).                                                    |
+| `HELM_REPO_CREDENTIALS` | Private Helm repos (classic), comma-separated `https://user:password@host/path`.                                                        |
+| `DOCKER_CONFIG`         | Private registries: directory with a Docker `config.json` (see below).                                                                  |
+| `TZ`                    | Time zone for scan schedules, e.g. `Europe/Prague` (default `UTC`).                                                                     |
+| `SCAN_RETENTION`        | Scans kept per monitor; older ones are deleted (default `10`).                                                                          |
+| `SCAN_CONCURRENCY`      | Images scanned by Trivy at once (default `8`); lower it on a small machine or if a registry rate-limits.                                |
+| `TRIVY_TIMEOUT`         | Time limit per image (default `5m`). An image that hits it is skipped for 24 h; raise it so a huge image finishes once and gets cached. |
+| `PUBLIC_URL`            | Where the app is reachable, for links in notifications (e.g. `https://cm.example.com`).                                                 |
+| `PORT`                  | Port the app is published on (default `3000`).                                                                                          |
+| `INCLUDE_PRERELEASES`   | Also treat pre-release versions (`1.2.0-rc.1`) as updates (default `false`).                                                            |
+| `TRUST_PROXY`           | Behind a reverse proxy: its IP or CIDR (comma-separated), so the login rate limit sees real clients.                                    |
 
 Generate the password hash with `htpasswd` (package `apache2-utils` / `httpd-tools`):
 

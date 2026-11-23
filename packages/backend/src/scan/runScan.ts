@@ -15,6 +15,7 @@ import {
   fetchChartVersions,
   normalizeChartRepoUrl,
   type PublishedVersion,
+  type RepoIndexCache,
 } from '../helm/chartVersions.js';
 import {
   compareVersions,
@@ -35,10 +36,8 @@ import { redactSecrets } from '../config/auth.js';
 import { env } from '../config/env.js';
 import { RegistryAuthError } from '../errors.js';
 
-// Each trivy scan pulls image layers and runs full vuln-DB matching — cap how many run at once
-const CVE_SCAN_CONCURRENCY = 4;
 // Chart version lookups and `helm template` runs are mostly network-bound
-const CHART_CONCURRENCY = 4;
+const CHART_CONCURRENCY = 8;
 
 /** Error message plus the most telling line of a failed CLI's stderr (helm/trivy wrap the
  * child-process error as `cause`). */
@@ -65,7 +64,7 @@ async function resolveChartFinding(
   job: ChartJob,
 ): Promise<{ finding: ChartFinding; published: PublishedVersion[] }> {
   const { applicationName, applicationSetName, source } = job;
-  const published = await fetchChartVersions(source.repoURL, source.chart).catch(
+  const published = await fetchChartVersions(source.repoURL, source.chart, job.repoIndexes).catch(
     warnOnAuthError(job.ctx.warn),
   );
   const latestVersion = findLatestVersion(
@@ -322,6 +321,7 @@ interface ChartJob {
   valuesDocuments: string[];
   helm: HelmSession;
   changelogCache: ChangelogCache;
+  repoIndexes: RepoIndexCache;
 }
 
 export async function executeScan(
@@ -335,6 +335,7 @@ export async function executeScan(
     credentials: env.GIT_CREDENTIALS,
   });
   const helm = await HelmSession.create();
+  const repoIndexes: RepoIndexCache = new Map();
   // Warnings are stored and shown: no credential a CLI echoed may end up in them
   const ctx: ScanContext = { openRepo, warn: (message) => warnings.add(redactSecrets(message)) };
   const flushWarnings = () => reporter.warnings([...warnings]);
@@ -369,6 +370,7 @@ export async function executeScan(
           valuesDocuments,
           helm,
           changelogCache,
+          repoIndexes,
         });
       }
     }
@@ -450,7 +452,7 @@ export async function executeScan(
     ];
     const scanned = new Map<string, ImageVulnerability[] | null>();
     await reporter.phase(ScanPhase.VULNERABILITIES, uniqueImages.length);
-    await mapWithConcurrency(uniqueImages, CVE_SCAN_CONCURRENCY, async (image) => {
+    await mapWithConcurrency(uniqueImages, env.SCAN_CONCURRENCY, async (image) => {
       const vulnerabilities = await scanImageForVulnerabilities(image).catch((error) => {
         ctx.warn(`vulnerability scan of ${image} failed: ${describeError(error)}`);
         return null;

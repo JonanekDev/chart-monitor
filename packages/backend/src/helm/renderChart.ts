@@ -6,7 +6,6 @@ import { promisify } from 'node:util';
 import { parse, parseAllDocuments } from 'yaml';
 import type { ApplicationSource } from '../argocd/types.js';
 import { helmRepoCredentials } from '../config/auth.js';
-import type { Credentials } from '../config/credentials.js';
 import { env } from '../config/env.js';
 import { HelmResolutionError } from '../errors.js';
 
@@ -17,19 +16,20 @@ const HELM_ENV = env.DOCKER_CONFIG
   ? { ...process.env, HELM_REGISTRY_CONFIG: env.DOCKER_CONFIG.file }
   : process.env;
 
-/** `helm repo add` with the password on stdin, so it never shows up in a process list */
-function repoAdd(args: string[], password: string): Promise<void> {
+/** `helm repo add`, a password going on stdin so it never shows up in a process list */
+function repoAdd(args: string[], password?: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = execFile('helm', args, { env: HELM_ENV }, (error, _stdout, stderr) =>
       error ? reject(Object.assign(error, { stderr })) : resolve(),
     );
-    child.stdin?.end(password);
+    child.stdin?.end(password ?? '');
   });
 }
 
-/** One per scan. Private classic repos (HELM_REPO_CREDENTIALS) can't take a login with `--repo`
- * without putting the password on the command line, so they're added under an alias to a
- * repositories.yaml, with its own cache, in the scan's temp dir; `cleanup` removes both. */
+/** One per scan. Classic repos are added under an alias to a repositories.yaml, with its own cache,
+ * in the scan's temp dir (`cleanup` removes both): `helm … --repo` would download and parse the
+ * repo's whole index.yaml on every call (6.8 MB for prometheus-community), an alias does it once
+ * per scan. A login (HELM_REPO_CREDENTIALS) also needs the alias, to stay off the command line. */
 export class HelmSession {
   private readonly aliases = new Map<string, Promise<string>>();
   // One `helm repo add` at a time: they all rewrite the same repositories.yaml
@@ -60,23 +60,23 @@ export class HelmSession {
     if (source.repoURL.startsWith('oci://')) {
       return [`${source.repoURL}/${source.chart}`, ...version];
     }
-    const login = helmRepoCredentials(source.repoURL);
-    if (!login) return [source.chart as string, ...version, '--repo', source.repoURL];
     return [
-      `${await this.alias(source.repoURL, login)}/${source.chart}`,
+      `${await this.alias(source.repoURL)}/${source.chart}`,
       ...version,
       ...this.repoConfigArgs,
     ];
   }
 
-  private alias(repoUrl: string, login: Credentials): Promise<string> {
+  private alias(repoUrl: string): Promise<string> {
     let alias = this.aliases.get(repoUrl);
     if (!alias) {
-      const name = `private-${this.aliases.size}`;
-      const args = ['repo', 'add', name, repoUrl, '--username', login.username, '--password-stdin'];
+      const name = `repo-${this.aliases.size}`;
+      const login = helmRepoCredentials(repoUrl);
+      const args = ['repo', 'add', name, repoUrl, ...this.repoConfigArgs];
+      if (login) args.push('--username', login.username, '--password-stdin');
       alias = this.adding
         .catch(() => {})
-        .then(() => repoAdd([...args, ...this.repoConfigArgs], login.password))
+        .then(() => repoAdd(args, login?.password))
         .then(() => name);
       this.adding = alias;
       this.aliases.set(repoUrl, alias);
