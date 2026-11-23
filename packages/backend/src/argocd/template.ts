@@ -1,3 +1,4 @@
+import type { Params } from './generators.js';
 // Leading dot is optional so `goTemplate: true` syntax ({{ .path.basename }}) resolves too
 const PLACEHOLDER_PATTERN = /\{\{\s*\.?([\w.-]+)\s*\}\}/g;
 
@@ -7,16 +8,15 @@ export interface SubstitutionResult<T> {
 }
 
 /** Deep-substitutes `{{ key }}` placeholders in every string field using a flat param record. */
-export function substituteTemplate<T>(
-  input: T,
-  params: Record<string, string>,
-): SubstitutionResult<T> {
+export function substituteTemplate<T>(input: T, params: Params): SubstitutionResult<T> {
   const unresolvedKeys = new Set<string>();
 
   const substitute = (node: unknown): unknown => {
     if (typeof node === 'string') {
       return node.replace(PLACEHOLDER_PATTERN, (match, key: string) => {
-        if (key in params) return params[key] as string;
+        const value = params[key];
+        // Lists and maps only make sense to a goTemplate templatePatch
+        if (['string', 'number', 'boolean'].includes(typeof value)) return String(value);
         unresolvedKeys.add(key);
         return match;
       });

@@ -61,6 +61,9 @@ export interface ApplicationSetManifest {
   metadata: { name: string };
   spec: {
     generators?: ApplicationSetGenerator[];
+    goTemplate?: boolean;
+    /** A Go template rendered per param set and patched onto the template (goTemplate only) */
+    templatePatch?: string;
     template: {
       metadata?: { name?: string };
       spec?: {

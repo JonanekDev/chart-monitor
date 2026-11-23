@@ -112,6 +112,7 @@ their own format (Teams, ntfy, Gotify) need one of those in between.
 - `Application` and `ApplicationSet`, single `source` or multiple `sources`
 - generators: `list`, `git` (directories and files), `matrix`, `merge`, plus generator `values`
 - `goTemplate: true` with plain placeholders (`{{ .name }}`, not template functions)
+- `templatePatch` (goTemplate), rendered with Go templates and Sprig functions like in ArgoCD
 - Helm values from `valueFiles` (`$ref/...`), `values` and `valuesObject`
 - umbrella charts (a git `path` whose `Chart.yaml` depends on external charts)
 - Helm repos over HTTPS and OCI, public or with a login

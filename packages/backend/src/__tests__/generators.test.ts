@@ -3,11 +3,12 @@ import { expandGenerators, flattenParams } from '../argocd/generators.js';
 import { testContext } from './helpers/memoryRepo.js';
 
 describe('flattenParams', () => {
-  it('joins nested keys with dots and stringifies scalars, skipping arrays and nulls', () => {
+  it('joins nested keys with dots, keeping types and lists, skipping nulls', () => {
     expect(flattenParams({ a: 1, b: { c: true, d: { e: 'x' } }, f: [1], g: null })).toEqual({
-      a: '1',
-      'b.c': 'true',
+      a: 1,
+      'b.c': true,
       'b.d.e': 'x',
+      f: [1],
     });
   });
 });
@@ -61,6 +62,45 @@ describe('expandGenerators', () => {
       ['a', '1.0.0'],
       ['b', '2.0.0'],
     ]);
+  });
+
+  it('git files: adds where each file is, like ArgoCD (path, path.path, basename, filename)', async () => {
+    const { ctx } = testContext({
+      'https://github.com/o/r': {
+        'clusters/a/apps/vpa/config.yml': 'appName: vpa',
+        'top.yml': 'appName: top',
+      },
+    });
+    const result = await expandGenerators(
+      [
+        {
+          git: {
+            repoURL: 'https://github.com/o/r',
+            revision: 'HEAD',
+            files: [{ path: '**/*.yml' }],
+          },
+        },
+      ],
+      ctx,
+    );
+    expect(result).toEqual(
+      expect.arrayContaining([
+        {
+          appName: 'vpa',
+          path: 'clusters/a/apps/vpa',
+          'path.path': 'clusters/a/apps/vpa',
+          'path.basename': 'vpa',
+          'path.filename': 'config.yml',
+        },
+        {
+          appName: 'top',
+          path: '',
+          'path.path': '',
+          'path.basename': '',
+          'path.filename': 'top.yml',
+        },
+      ]),
+    );
   });
 
   it('merge: overrides base rows matching on mergeKeys and drops unmatched overrides', async () => {

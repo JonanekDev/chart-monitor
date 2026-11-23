@@ -1,19 +1,24 @@
+import { posix } from 'node:path';
 import { minimatch } from 'minimatch';
 import { parse } from 'yaml';
 import { substituteTemplate } from './template.js';
 import type { ApplicationSetGenerator, ScanContext } from './types.js';
 
-/** Flattens parsed YAML into string params the way ArgoCD does: nested keys are joined with dots
- * (`{ aws: { region: x } }` → `aws.region`). Arrays are skipped. */
-export function flattenParams(obj: Record<string, unknown>, prefix = ''): Record<string, string> {
+/** Template params by dotted key (`aws.region`). Values keep their YAML type, lists included:
+ * plain placeholders only use scalars, but a goTemplate templatePatch needs `range` and `if`. */
+export type Params = Record<string, unknown>;
+
+/** Flattens parsed YAML into params the way ArgoCD does: nested keys are joined with dots
+ * (`{ aws: { region: x } }` → `aws.region`); lists stay whole. */
+export function flattenParams(obj: Record<string, unknown>, prefix = ''): Params {
   return Object.fromEntries(
-    Object.entries(obj).flatMap(([key, value]): [string, string][] => {
+    Object.entries(obj).flatMap(([key, value]): [string, unknown][] => {
       const fullKey = prefix + key;
-      if (value === null || Array.isArray(value)) return [];
-      if (typeof value === 'object') {
+      if (value === null) return [];
+      if (typeof value === 'object' && !Array.isArray(value)) {
         return Object.entries(flattenParams(value as Record<string, unknown>, `${fullKey}.`));
       }
-      return [[fullKey, String(value)]];
+      return [[fullKey, value]];
     }),
   );
 }
@@ -21,7 +26,7 @@ export function flattenParams(obj: Record<string, unknown>, prefix = ''): Record
 async function expandGitDirectoryGenerator(
   generator: NonNullable<ApplicationSetGenerator['git']>,
   ctx: ScanContext,
-): Promise<Record<string, string>[]> {
+): Promise<Params[]> {
   if (!generator.directories?.length) return [];
   const repo = await ctx.openRepo(generator.repoURL, generator.revision);
 
@@ -41,12 +46,14 @@ async function expandGitDirectoryGenerator(
   }));
 }
 
+const dir = (file: string) => posix.dirname(file).replace(/^\.$/, '');
+
 /** Expands a `git.files` generator: each matched file is parsed as YAML and must contain either a
  * list of param objects, or a single param object. */
 async function expandGitFilesGenerator(
   generator: NonNullable<ApplicationSetGenerator['git']>,
   ctx: ScanContext,
-): Promise<Record<string, string>[]> {
+): Promise<Params[]> {
   if (!generator.files?.length) return [];
   const repo = await ctx.openRepo(generator.repoURL, generator.revision);
 
@@ -62,7 +69,14 @@ async function expandGitFilesGenerator(
         .filter(
           (item): item is Record<string, unknown> => typeof item === 'object' && item !== null,
         )
-        .map((item) => flattenParams(item));
+        .map((item) => ({
+          ...flattenParams(item),
+          // Where the file is, as ArgoCD adds it: `{{path}}` or, with goTemplate, `.path.path`
+          path: dir(path),
+          'path.path': dir(path),
+          'path.basename': posix.basename(dir(path)),
+          'path.filename': posix.basename(path),
+        }));
     }),
   );
 
@@ -72,7 +86,7 @@ async function expandGitFilesGenerator(
 async function expandGenerator(
   generator: ApplicationSetGenerator,
   ctx: ScanContext,
-): Promise<Record<string, string>[]> {
+): Promise<Params[]> {
   if (generator.list) {
     return (generator.list.elements ?? []).map((element) => flattenParams(element));
   }
@@ -98,7 +112,7 @@ async function expandGenerator(
 async function expandWithValues(
   generator: ApplicationSetGenerator,
   ctx: ScanContext,
-): Promise<Record<string, string>[]> {
+): Promise<Params[]> {
   return applyGeneratorValues(generator, await expandGenerator(generator, ctx));
 }
 
@@ -107,7 +121,7 @@ async function expandWithValues(
 async function expandMatrixGenerator(
   children: ApplicationSetGenerator[],
   ctx: ScanContext,
-): Promise<Record<string, string>[]> {
+): Promise<Params[]> {
   const [first, second] = children;
   if (!first || !second || children.length > 2) {
     ctx.warn('matrix generator needs exactly two child generators, skipped');
@@ -115,7 +129,7 @@ async function expandMatrixGenerator(
   }
 
   const firstSets = await expandWithValues(first, ctx);
-  const secondCache = new Map<string, Promise<Record<string, string>[]>>();
+  const secondCache = new Map<string, Promise<Params[]>>();
   const combined = await Promise.all(
     firstSets.map(async (firstParams) => {
       const substituted = substituteTemplate(second, firstParams).value;
@@ -131,7 +145,7 @@ async function expandMatrixGenerator(
 async function expandMergeGenerator(
   { generators: children, mergeKeys }: NonNullable<ApplicationSetGenerator['merge']>,
   ctx: ScanContext,
-): Promise<Record<string, string>[]> {
+): Promise<Params[]> {
   const [base = [], ...overrides] = await Promise.all(
     children.map((child) => expandWithValues(child, ctx)),
   );
@@ -145,10 +159,7 @@ async function expandMergeGenerator(
 
 /** Adds the generator's `values:` block as `values.<key>` params. Values may reference the
  * generator's own params (e.g. `{{path.basename}}`), same as in ArgoCD. */
-function applyGeneratorValues(
-  generator: ApplicationSetGenerator,
-  paramSets: Record<string, string>[],
-): Record<string, string>[] {
+function applyGeneratorValues(generator: ApplicationSetGenerator, paramSets: Params[]): Params[] {
   // Every generator is a single-key object ({ git: {...} }, { list: {...} }, ...)
   const values = (Object.values(generator)[0] as { values?: Record<string, unknown> } | undefined)
     ?.values;
@@ -164,7 +175,7 @@ function applyGeneratorValues(
 export async function expandGenerators(
   generators: ApplicationSetGenerator[],
   ctx: ScanContext,
-): Promise<Record<string, string>[]> {
+): Promise<Params[]> {
   const results = await Promise.all(
     generators.map(async (generator) => {
       try {
