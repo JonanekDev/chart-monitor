@@ -19,6 +19,7 @@ import {
 } from '../helm/chartVersions.js';
 import {
   compareVersions,
+  findLatestImageTag,
   findLatestVersion,
   isSureUpgrade,
   versionsBetween,
@@ -91,7 +92,7 @@ async function resolveImageFindings(job: ChartJob, images: string[]): Promise<Im
     images.map(async (image): Promise<ImageFinding> => {
       const [repository, currentTag = 'latest'] = splitImageTag(image);
       const tags = await fetchImageTags(image).catch(warnOnAuthError(job.ctx.warn));
-      const latestTag = findLatestVersion(tags, env.INCLUDE_PRERELEASES);
+      const latestTag = findLatestImageTag(tags, currentTag, env.INCLUDE_PRERELEASES);
 
       return {
         applicationName,
